@@ -19,6 +19,7 @@ export async function seedIfEmpty() {
         name: "Review pull request",
         completed: false,
         details: "",
+        position: 0,
         listId: "1",
       },
       {
@@ -26,6 +27,7 @@ export async function seedIfEmpty() {
         name: "Send weekly update",
         completed: true,
         details: "",
+        position: 1,
         listId: "1",
       },
       {
@@ -33,6 +35,7 @@ export async function seedIfEmpty() {
         name: "Buy groceries",
         completed: false,
         details: "",
+        position: 0,
         listId: "2",
       },
     ],
@@ -43,7 +46,7 @@ export async function getTodoData() {
   await seedIfEmpty();
 
   const lists = await prisma.todoList.findMany({
-    include: { tasks: { orderBy: { createdAt: "asc" } } },
+    include: { tasks: { orderBy: [{ position: "asc" }, { createdAt: "asc" }] } },
     orderBy: { createdAt: "asc" },
   });
 

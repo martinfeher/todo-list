@@ -1,22 +1,31 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
-import type { CompletedTask, TodoList } from "./todo-app";
+import type { CompletedTask, SearchTask, TodoList } from "./todo-app";
 import { ConfirmModal } from "./confirm-modal";
 import { RenameListModal } from "./rename-list-modal";
 import { ThreeDotsIcon } from "./three-dots-icon";
+
+const SearchModal = dynamic(
+  () => import("./search-modal").then((module) => module.SearchModal),
+  { ssr: false },
+);
 
 const NAV_ITEMS = ["Search", "Important", "Today"] as const;
 
 type SidebarProps = {
   lists: TodoList[];
   completedTasks: CompletedTask[];
+  searchTasks: SearchTask[];
   selectedListId: string | null;
   isTodaySelected: boolean;
   selectedTaskId: string | null;
   onSelectList: (listId: string) => void;
   onSelectToday: () => void;
   onSelectCompletedTask: (taskId: string, listId: string) => void;
+  onSelectSearchTask: (taskId: string, listId: string) => void;
+  onToggleTask: (taskId: string) => void;
   onAddList: () => void;
   onRenameList: (listId: string, name: string) => void;
   onRemoveList: (listId: string) => void;
@@ -42,17 +51,21 @@ function getItemClassName(isSelected: boolean, baseClassName = itemClassName) {
 export function Sidebar({
   lists,
   completedTasks,
+  searchTasks,
   selectedListId,
   isTodaySelected,
   selectedTaskId,
   onSelectList,
   onSelectToday,
   onSelectCompletedTask,
+  onSelectSearchTask,
+  onToggleTask,
   onAddList,
   onRenameList,
   onRemoveList,
 }: SidebarProps) {
   const [isCompletedOpen, setIsCompletedOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [openMenuListId, setOpenMenuListId] = useState<string | null>(null);
   const [renameList, setRenameList] = useState<TodoList | null>(null);
   const [removeList, setRemoveList] = useState<TodoList | null>(null);
@@ -89,7 +102,13 @@ export function Sidebar({
             <button
               key={label}
               type="button"
-              onClick={label === "Today" ? onSelectToday : undefined}
+              onClick={
+                label === "Today"
+                  ? onSelectToday
+                  : label === "Search"
+                    ? () => setIsSearchOpen(true)
+                    : undefined
+              }
               className={`${getItemClassName(label === "Today" && isTodaySelected)} px-4`}
             >
               {label}
@@ -204,6 +223,14 @@ export function Sidebar({
             ))}
         </div>
       </aside>
+
+      <SearchModal
+        open={isSearchOpen}
+        tasks={isSearchOpen ? searchTasks : []}
+        onClose={() => setIsSearchOpen(false)}
+        onSelectTask={onSelectSearchTask}
+        onToggleTask={onToggleTask}
+      />
 
       <RenameListModal
         open={renameList !== null}

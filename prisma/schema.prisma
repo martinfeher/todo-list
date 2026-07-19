@@ -26,6 +26,7 @@ model Task {
   completed Boolean   @default(false)
   details   String    @default("")
   dueDate   DateTime?
+  position  Int       @default(0)
   listId    String
   list      TodoList  @relation(fields: [listId], references: [id], onDelete: Cascade)
   createdAt DateTime  @default(now())

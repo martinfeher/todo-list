@@ -1,17 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createTask,
   createTodoList,
   deleteTodoList,
   renameTask as renameTaskInDb,
   renameTodoList,
+  reorderTasks as reorderTasksInDb,
   toggleTask as toggleTaskInDb,
 } from "@/app/actions/todo";
 import { Sidebar } from "./sidebar";
 import { TaskDetailsPanel } from "./task-details-panel";
 import { TaskListPanel } from "./task-list-panel";
+import { mergeReorderedActiveTasks } from "./task-reorder";
 import { UndoButton } from "./undo-button";
 
 export type Task = {
@@ -28,6 +30,11 @@ export type TodoList = {
 };
 
 export type CompletedTask = Task & {
+  listId: string;
+  listName: string;
+};
+
+export type SearchTask = Task & {
   listId: string;
   listName: string;
 };
@@ -99,14 +106,30 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
   const taskListItems: TaskListItem[] =
     activeView === "today" ? todayTasks : activeTasks;
 
-  const completedTasks: CompletedTask[] = lists.flatMap((list) =>
-    (tasksByList[list.id] ?? [])
-      .filter((task) => task.completed)
-      .map((task) => ({
-        ...task,
-        listId: list.id,
-        listName: list.name,
-      })),
+  const completedTasks: CompletedTask[] = useMemo(
+    () =>
+      lists.flatMap((list) =>
+        (tasksByList[list.id] ?? [])
+          .filter((task) => task.completed)
+          .map((task) => ({
+            ...task,
+            listId: list.id,
+            listName: list.name,
+          })),
+      ),
+    [lists, tasksByList],
+  );
+
+  const searchTasks: SearchTask[] = useMemo(
+    () =>
+      lists.flatMap((list) =>
+        (tasksByList[list.id] ?? []).map((task) => ({
+          ...task,
+          listId: list.id,
+          listName: list.name,
+        })),
+      ),
+    [lists, tasksByList],
   );
 
   const clearUndoTimer = useCallback(() => {
@@ -323,6 +346,30 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
     handleTaskRenamed(taskId, updatedTask.name);
   }
 
+  async function reorderTasks(listId: string, activeTaskIds: string[]) {
+    const currentTasks = tasksByList[listId] ?? [];
+    const expectedActiveCount = currentTasks.filter(
+      (task) => !task.completed,
+    ).length;
+
+    if (activeTaskIds.length !== expectedActiveCount) return;
+
+    const mergedTasks = mergeReorderedActiveTasks(
+      currentTasks,
+      activeTaskIds,
+    );
+
+    setTasksByList((current) => ({
+      ...current,
+      [listId]: mergedTasks,
+    }));
+
+    await reorderTasksInDb(
+      listId,
+      mergedTasks.map((task) => task.id),
+    );
+  }
+
   const showDetailsPanel = selectedTaskId !== null;
 
   return (
@@ -331,12 +378,15 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
         <Sidebar
           lists={lists}
           completedTasks={completedTasks}
+          searchTasks={searchTasks}
           selectedListId={selectedListId}
           isTodaySelected={activeView === "today"}
           selectedTaskId={selectedTaskId}
           onSelectList={selectList}
           onSelectToday={selectToday}
           onSelectCompletedTask={selectCompletedTask}
+          onSelectSearchTask={selectCompletedTask}
+          onToggleTask={toggleTask}
           onAddList={addList}
           onRenameList={renameList}
           onRemoveList={removeList}
@@ -347,10 +397,12 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
           selectedTaskId={selectedTaskId}
           expanded={!showDetailsPanel}
           showAddTask={selectedListId !== null}
+          listId={selectedListId}
           onAddTask={addTask}
           onToggleTask={toggleTask}
           onSelectTask={setSelectedTaskId}
           onRenameTask={renameTask}
+          onReorderTasks={reorderTasks}
         />
         {showDetailsPanel && (
           <TaskDetailsPanel
