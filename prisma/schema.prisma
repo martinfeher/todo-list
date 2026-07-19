@@ -21,12 +21,13 @@ model TodoList {
 }
 
 model Task {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   name      String
-  completed Boolean  @default(false)
-  details   String   @default("")
+  completed Boolean   @default(false)
+  details   String    @default("")
+  dueDate   DateTime?
   listId    String
-  list      TodoList @relation(fields: [listId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  list      TodoList  @relation(fields: [listId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }

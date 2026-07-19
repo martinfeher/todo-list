@@ -52,11 +52,12 @@ export async function getTodoData() {
     tasksByList: Object.fromEntries(
       lists.map((list) => [
         list.id,
-        list.tasks.map(({ id, name, completed, details }) => ({
+        list.tasks.map(({ id, name, completed, details, dueDate }) => ({
           id,
           name,
           completed,
           details,
+          dueDate: dueDate ? dueDate.toISOString() : null,
         })),
       ]),
     ),

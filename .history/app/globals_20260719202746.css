@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-proxima-nova), ui-sans-serif, system-ui, sans-serif;
+
+  /* Mid-tone zinc steps between the default Tailwind palette */
+  --color-zinc-150: oklch(94.35% 0.0025 286.347);
+  --color-zinc-250: oklch(89.55% 0.005 286.303);
+  --color-zinc-350: oklch(78.8% 0.0105 286.177);
+  --color-zinc-450: oklch(62.85% 0.0155 286.002);
+  --color-zinc-550: oklch(49.7% 0.0165 285.862);
+  --color-zinc-650: oklch(40.6% 0.015 285.796);
+  --color-zinc-750: oklch(32.2% 0.0095 285.919);
+  --color-zinc-850: oklch(24.2% 0.006 285.959);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-proxima-nova), ui-sans-serif, system-ui, sans-serif;
+}
+
+.detail-line[data-line-type="bullet"]::before {
+  content: "•";
+  margin-right: 0.5rem;
+}
+
+.detail-line[data-line-type="numbered"]::before {
+  content: attr(data-list-number) ".";
+  margin-right: 0.5rem;
+}
+
+.detail-line[data-line-type="checklist"]::before {
+  content: "☐";
+  margin-right: 0.5rem;
+}
+
+.detail-line[data-line-type="checklist"][data-checked="true"]::before {
+  content: "☑";
+}
+
+.detail-line[data-line-type="h1"] {
+  margin-bottom: 3px;
+}
+
+.detail-line[data-line-type="h1"][data-empty="true"]::before {
+  content: "Title";
+  color: #a1a1aa;
+  pointer-events: none;
+}
+
+.detail-line[data-line-type="text"][data-empty="true"]::before,
+.detail-line:not([data-line-type="h1"]):not([data-line-type="h2"]):not([data-line-type="bullet"]):not([data-line-type="numbered"]):not([data-line-type="checklist"])[data-empty="true"]::before {
+  content: "Start writing";
+  color: #d4d4d8;
+  pointer-events: none;
+}
