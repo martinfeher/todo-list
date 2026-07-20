@@ -1,3 +1,9 @@
+import {
+  applyInitialImageDisplaySize,
+  ensureImageResizeHandles,
+  waitForInitialImageDisplaySize,
+} from "./detail-image-resize";
+
 export const DETAIL_LINE_CLASS = "detail-line";
 
 export type LineBlockType =
@@ -6,7 +12,9 @@ export type LineBlockType =
   | "h2"
   | "bullet"
   | "numbered"
-  | "checklist";
+  | "checklist"
+  | "image"
+  | "code";
 
 function generateLineId() {
   return crypto.randomUUID();
@@ -50,6 +58,7 @@ export function ensureBlockLines(editor: HTMLElement) {
         line.dataset.lineId = generateLineId();
       }
     });
+    normalizeImageLines(editor);
     return;
   }
 
@@ -225,6 +234,37 @@ function applyBlockTypeToLine(
   delete line.dataset.checked;
 }
 
+function codeLineNeedsNormalization(line: HTMLElement) {
+  return Boolean(
+    line.querySelector(
+      "span, b, strong, i, em, u, mark, s, strike, a, div, p, img, script, style, font",
+    ),
+  );
+}
+
+export function isCodeLine(line: HTMLElement | null) {
+  return line?.dataset.lineType === "code";
+}
+
+export function normalizeCodeLine(line: HTMLElement) {
+  if (line.dataset.lineType !== "code") return false;
+  if (!codeLineNeedsNormalization(line)) return false;
+
+  const text = line.innerText.replace(/\r\n/g, "\n").replace(/\n$/, "");
+  line.textContent = text;
+  if (!line.textContent) {
+    line.innerHTML = "<br>";
+  }
+
+  return true;
+}
+
+function normalizeCodeLines(editor: HTMLElement) {
+  getLineElements(editor).forEach((line) => {
+    normalizeCodeLine(line);
+  });
+}
+
 export function getLinesInSelection(editor: HTMLElement) {
   ensureBlockLines(editor);
 
@@ -269,6 +309,8 @@ export function applyBlockTypeToSelection(
       : 1;
 
   selectedLines.forEach((line) => {
+    if (line.querySelector(".detail-image-wrapper")) return;
+
     if (type === "numbered") {
       applyBlockTypeToLine(line, type, allLines, nextNumber);
       nextNumber += 1;
@@ -276,6 +318,9 @@ export function applyBlockTypeToSelection(
     }
 
     applyBlockTypeToLine(line, type, allLines);
+    if (type === "code") {
+      normalizeCodeLine(line);
+    }
   });
 }
 
@@ -313,14 +358,7 @@ export function insertTypedLineBelowLine(
   }
 
   line.after(newLine);
-
-  const selection = window.getSelection();
-  const range = document.createRange();
-  range.setStart(newLine, 0);
-  range.collapse(true);
-  selection?.removeAllRanges();
-  selection?.addRange(range);
-  editor.focus();
+  focusDetailLine(editor, newLine);
 }
 
 export function insertLineBelow(editor: HTMLElement) {
@@ -334,13 +372,7 @@ export function insertLineBelow(editor: HTMLElement) {
 
   const newLine = createLineElement("<br>");
   editor.appendChild(newLine);
-
-  const selection = window.getSelection();
-  const range = document.createRange();
-  range.setStart(newLine, 0);
-  range.collapse(true);
-  selection?.removeAllRanges();
-  selection?.addRange(range);
+  focusDetailLine(editor, newLine);
 }
 
 export function splitLineAtCursor(editor: HTMLElement) {
@@ -371,13 +403,20 @@ export function splitLineAtCursor(editor: HTMLElement) {
   }
 
   const newLine = createLineElement(afterHtml);
+  const lineType = activeLine.dataset.lineType as LineBlockType | undefined;
+
+  if (lineType && lineType !== "text") {
+    applyBlockTypeToLine(newLine, lineType, getLineElements(editor));
+  }
+
   activeLine.after(newLine);
 
-  const caretRange = document.createRange();
-  caretRange.setStart(newLine, 0);
-  caretRange.collapse(true);
-  selection.removeAllRanges();
-  selection.addRange(caretRange);
+  if (lineType === "code") {
+    normalizeCodeLine(activeLine);
+    normalizeCodeLine(newLine);
+  }
+
+  placeCaretInLine(newLine);
 }
 
 function escapeHtml(text: string) {
@@ -387,8 +426,279 @@ function escapeHtml(text: string) {
     .replace(/>/g, "&gt;");
 }
 
+function createImageDeleteButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "detail-image-delete";
+  button.setAttribute("aria-label", "Delete image");
+  button.setAttribute("title", "Delete image");
+  button.contentEditable = "false";
+  button.innerHTML =
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="M4 4l8 8M12 4 4 12" stroke-linecap="round" /></svg>';
+  return button;
+}
+
+function wrapImageWithControls(image: HTMLImageElement) {
+  let wrapper = image.parentElement;
+
+  if (!wrapper?.classList.contains("detail-image-wrapper")) {
+    wrapper = document.createElement("div");
+    wrapper.className = "detail-image-wrapper";
+    image.replaceWith(wrapper);
+    wrapper.appendChild(image);
+  }
+
+  prepareBlockImageWrapper(wrapper);
+
+  if (!wrapper.querySelector(".detail-image-delete")) {
+    wrapper.appendChild(createImageDeleteButton());
+  }
+
+  ensureImageResizeHandles(wrapper);
+
+  return wrapper;
+}
+
+function prepareBlockImageWrapper(wrapper: HTMLElement) {
+  wrapper.contentEditable = "false";
+  wrapper.classList.add("detail-image-wrapper");
+  wrapper.style.removeProperty("float");
+  wrapper.style.display = "block";
+  wrapper.style.clear = "both";
+  wrapper.style.removeProperty("margin-right");
+
+  if (!wrapper.style.marginBottom) {
+    wrapper.style.marginBottom = "0.35rem";
+  }
+}
+
+function createImageWrapper(src: string) {
+  const image = document.createElement("img");
+  image.src = src;
+  image.alt = "Embedded image";
+  image.className = "detail-image";
+  image.draggable = false;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "detail-image-wrapper";
+  wrapper.appendChild(image);
+  wrapper.appendChild(createImageDeleteButton());
+  ensureImageResizeHandles(wrapper);
+  prepareBlockImageWrapper(wrapper);
+
+  return wrapper;
+}
+
+function ensureContentBelowWrapper(wrapper: HTMLElement) {
+  let next = wrapper.nextSibling;
+
+  while (
+    next?.nodeType === Node.TEXT_NODE &&
+    !(next.textContent ?? "").replace(/\u200B/g, "").trim()
+  ) {
+    const toRemove = next;
+    next = next.nextSibling;
+    toRemove.remove();
+  }
+
+  if (!next) {
+    wrapper.after(document.createElement("br"));
+  }
+}
+
+export function placeCaretBelowWrapper(wrapper: HTMLElement) {
+  ensureContentBelowWrapper(wrapper);
+
+  const line = wrapper.parentElement;
+  const selection = window.getSelection();
+  if (!line || !selection) return;
+
+  const range = document.createRange();
+  range.setStartAfter(wrapper);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function insertImageWrapperIntoLine(
+  editor: HTMLElement,
+  line: HTMLElement,
+  wrapper: HTMLElement,
+) {
+  prepareBlockImageWrapper(wrapper);
+
+  const selection = window.getSelection();
+  const range =
+    selection && selection.rangeCount > 0
+      ? selection.getRangeAt(0)
+      : null;
+
+  if (range && line.contains(range.startContainer)) {
+    range.deleteContents();
+    range.insertNode(wrapper);
+  } else {
+    line.appendChild(wrapper);
+  }
+
+  placeCaretBelowWrapper(wrapper);
+  editor.focus();
+}
+
+function migrateLegacyImageLine(line: HTMLElement) {
+  if (line.dataset.lineType !== "image") return;
+
+  delete line.dataset.lineType;
+  line.removeAttribute("contenteditable");
+
+  const wrapper = line.querySelector(".detail-image-wrapper");
+  if (wrapper instanceof HTMLElement) {
+    prepareBlockImageWrapper(wrapper);
+    ensureContentBelowWrapper(wrapper);
+  }
+}
+
+export function removeImageWrapper(editor: HTMLElement, wrapper: HTMLElement) {
+  ensureBlockLines(editor);
+
+  const line = wrapper.closest(`.${DETAIL_LINE_CLASS}`);
+  if (!(line instanceof HTMLElement) || getLineIndex(editor, line) <= 0) {
+    return false;
+  }
+
+  wrapper.remove();
+  ensureTitleLine(editor);
+  syncLineEmptyState(editor);
+  placeCaretInLine(line);
+  editor.focus();
+
+  return true;
+}
+
+export async function insertImagesIntoEditor(
+  editor: HTMLElement,
+  imageSources: string[],
+  referenceLine?: HTMLElement | null,
+) {
+  if (imageSources.length === 0) return;
+
+  ensureBlockLines(editor);
+  ensureTitleLine(editor);
+
+  const lines = getLineElements(editor);
+  let targetLine =
+    referenceLine && lines.includes(referenceLine)
+      ? referenceLine
+      : getActiveLineElement(editor);
+
+  if (!targetLine || getLineIndex(editor, targetLine) === 0) {
+    targetLine = lines[1] ?? createLineElement("<br>", "text");
+    if (!lines.includes(targetLine)) {
+      const titleLine = lines[0];
+      if (titleLine) {
+        titleLine.after(targetLine);
+      } else {
+        editor.appendChild(targetLine);
+      }
+    }
+  }
+
+  for (const source of imageSources) {
+    const wrapper = createImageWrapper(source);
+    const image = wrapper.querySelector("img.detail-image");
+    if (image instanceof HTMLImageElement) {
+      await waitForInitialImageDisplaySize(image);
+    }
+
+    insertImageWrapperIntoLine(editor, targetLine, wrapper);
+  }
+
+  syncLineEmptyState(editor);
+}
+
+function normalizeImageLines(editor: HTMLElement) {
+  getLineElements(editor).forEach((line) => {
+    migrateLegacyImageLine(line);
+
+    const image = line.querySelector("img");
+
+    if (image && line.dataset.lineType !== "h1") {
+      if (line.dataset.lineType === "image") {
+        delete line.dataset.lineType;
+      }
+
+      line.removeAttribute("contenteditable");
+
+      if (!image.classList.contains("detail-image")) {
+        image.classList.add("detail-image");
+      }
+
+      image.draggable = false;
+      const wrapper = wrapImageWithControls(image);
+      prepareBlockImageWrapper(wrapper);
+
+      if (!image.style.width) {
+        if (image.complete && image.naturalWidth > 0) {
+          applyInitialImageDisplaySize(image);
+        } else {
+          image.addEventListener(
+            "load",
+            () => {
+              if (!image.style.width) {
+                applyInitialImageDisplaySize(image);
+              }
+            },
+            { once: true },
+          );
+        }
+      }
+    }
+  });
+}
+
 function isLineEmpty(line: HTMLElement) {
+  if (line.querySelector("img")) {
+    const clone = line.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll(".detail-image-wrapper").forEach((wrapper) => {
+      wrapper.remove();
+    });
+    return !(clone.textContent ?? "")
+      .replace(/\u00a0|\u200B/g, " ")
+      .trim();
+  }
+
   return !(line.textContent ?? "").replace(/\u00a0/g, " ").trim();
+}
+
+export function isDetailLineEmpty(line: HTMLElement) {
+  return isLineEmpty(line);
+}
+
+export function placeCaretInLine(line: HTMLElement) {
+  const selection = window.getSelection();
+  if (!selection) return;
+
+  if (isLineEmpty(line) && !line.querySelector("br")) {
+    line.innerHTML = "<br>";
+  }
+
+  const range = document.createRange();
+  const br = line.querySelector("br");
+
+  if (isLineEmpty(line) && br) {
+    range.setStartBefore(br);
+    range.collapse(true);
+  } else {
+    range.selectNodeContents(line);
+    range.collapse(true);
+  }
+
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+export function focusDetailLine(editor: HTMLElement, line: HTMLElement) {
+  editor.focus();
+  placeCaretInLine(line);
 }
 
 function isDetailsHtmlEmpty(html: string) {
@@ -410,6 +720,9 @@ function isDetailsHtmlEmpty(html: string) {
 }
 
 export function syncLineEmptyState(editor: HTMLElement) {
+  normalizeImageLines(editor);
+  normalizeCodeLines(editor);
+
   getLineElements(editor).forEach((line, index) => {
     const isEmpty = isLineEmpty(line);
 
@@ -419,7 +732,7 @@ export function syncLineEmptyState(editor: HTMLElement) {
       delete line.dataset.empty;
     }
 
-    if (isEmpty && index === 1) {
+    if (isEmpty && index === 1 && !line.querySelector(".detail-image-wrapper")) {
       line.dataset.bodyPlaceholder = "true";
     } else {
       delete line.dataset.bodyPlaceholder;

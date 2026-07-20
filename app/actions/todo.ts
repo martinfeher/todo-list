@@ -2,6 +2,21 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import {
+  normalizeDueDurationMinutes,
+  normalizeDueTimeMinutes,
+  normalizeDueTimeZone,
+  type TaskDueTime,
+} from "@/lib/task-due-time";
+import {
+  normalizePriority,
+  PRIORITY_TAG_CATEGORY,
+  prioritySlug,
+} from "@/lib/task-tags";
+import {
+  cleanupOrphanedTaskImages,
+  deleteTaskImageDirectory,
+} from "@/lib/task-image-storage";
 
 export async function getTaskById(taskId: string) {
   return prisma.task.findUnique({
@@ -12,6 +27,9 @@ export async function getTaskById(taskId: string) {
       completed: true,
       details: true,
       dueDate: true,
+      dueTimeMinutes: true,
+      dueDurationMinutes: true,
+      dueTimeZone: true,
     },
   });
 }
@@ -21,22 +39,112 @@ export async function updateTaskDetails(taskId: string, details: string) {
     where: { id: taskId },
     data: { details },
   });
+
+  await cleanupOrphanedTaskImages(taskId, details);
 }
 
 export async function updateTaskDueDate(taskId: string, dueDate: string | null) {
+  const existing = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { dueDate: true },
+  });
+
+  const existingDateValue = existing?.dueDate
+    ? existing.dueDate.toISOString().slice(0, 10)
+    : null;
+  const dateChanged = dueDate !== existingDateValue;
+
   const task = await prisma.task.update({
     where: { id: taskId },
     data: {
       dueDate: dueDate ? new Date(`${dueDate}T12:00:00`) : null,
+      ...(dateChanged
+        ? {
+            dueTimeMinutes: null,
+            dueDurationMinutes: null,
+            dueTimeZone: "floating",
+          }
+        : {}),
     },
     select: {
       id: true,
       dueDate: true,
+      dueTimeMinutes: true,
+      dueDurationMinutes: true,
+      dueTimeZone: true,
     },
   });
 
   revalidatePath("/");
-  return task;
+  return {
+    id: task.id,
+    dueDate: task.dueDate,
+    dueTimeMinutes: task.dueTimeMinutes,
+    dueDurationMinutes: task.dueDurationMinutes,
+    dueTimeZone: normalizeDueTimeZone(task.dueTimeZone),
+  };
+}
+
+export async function updateTaskDueTime(taskId: string, dueTime: TaskDueTime) {
+  const task = await prisma.task.update({
+    where: { id: taskId },
+    data: {
+      dueTimeMinutes: normalizeDueTimeMinutes(dueTime.dueTimeMinutes),
+      dueDurationMinutes: normalizeDueDurationMinutes(dueTime.dueDurationMinutes),
+      dueTimeZone: normalizeDueTimeZone(dueTime.dueTimeZone),
+    },
+    select: {
+      id: true,
+      dueTimeMinutes: true,
+      dueDurationMinutes: true,
+      dueTimeZone: true,
+    },
+  });
+
+  revalidatePath("/");
+  return {
+    id: task.id,
+    dueTimeMinutes: task.dueTimeMinutes,
+    dueDurationMinutes: task.dueDurationMinutes,
+    dueTimeZone: normalizeDueTimeZone(task.dueTimeZone),
+  };
+}
+
+export async function updateTaskPriority(taskId: string, priority: number | null) {
+  const normalizedPriority = normalizePriority(priority);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.taskTag.deleteMany({
+      where: {
+        taskId,
+        tag: { category: PRIORITY_TAG_CATEGORY },
+      },
+    });
+
+    if (normalizedPriority !== null) {
+      const tag = await tx.tag.findUnique({
+        where: { slug: prioritySlug(normalizedPriority) },
+        select: { id: true },
+      });
+
+      if (!tag) {
+        throw new Error(`Missing priority tag: ${prioritySlug(normalizedPriority)}`);
+      }
+
+      await tx.taskTag.create({
+        data: {
+          taskId,
+          tagId: tag.id,
+        },
+      });
+    }
+  });
+
+  revalidatePath("/");
+  return {
+    id: taskId,
+    priority: normalizedPriority,
+  };
 }
 
 export async function renameTask(taskId: string, name: string) {
@@ -60,9 +168,16 @@ export async function renameTodoList(listId: string, name: string) {
 }
 
 export async function deleteTodoList(listId: string) {
+  const tasks = await prisma.task.findMany({
+    where: { listId },
+    select: { id: true },
+  });
+
   await prisma.todoList.delete({
     where: { id: listId },
   });
+
+  await Promise.all(tasks.map((task) => deleteTaskImageDirectory(task.id)));
 
   revalidatePath("/");
 }

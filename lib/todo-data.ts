@@ -1,4 +1,31 @@
 import { prisma } from "@/lib/prisma";
+import {
+  getPriorityFromTaskTags,
+  PRIORITY_TAG_CATEGORY,
+  PRIORITY_TAGS,
+} from "@/lib/task-tags";
+import { normalizeDueTimeZone } from "@/lib/task-due-time";
+
+async function ensurePriorityTags() {
+  await Promise.all(
+    PRIORITY_TAGS.map((tag) =>
+      prisma.tag.upsert({
+        where: { slug: tag.slug },
+        create: {
+          id: `tag-${tag.slug}`,
+          slug: tag.slug,
+          label: tag.label,
+          category: PRIORITY_TAG_CATEGORY,
+          level: tag.level,
+        },
+        update: {
+          label: tag.label,
+          level: tag.level,
+        },
+      }),
+    ),
+  );
+}
 
 export async function seedIfEmpty() {
   const count = await prisma.todoList.count();
@@ -44,9 +71,20 @@ export async function seedIfEmpty() {
 
 export async function getTodoData() {
   await seedIfEmpty();
+  await ensurePriorityTags();
 
   const lists = await prisma.todoList.findMany({
-    include: { tasks: { orderBy: [{ position: "asc" }, { createdAt: "asc" }] } },
+    include: {
+      tasks: {
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+        include: {
+          tags: {
+            where: { tag: { category: PRIORITY_TAG_CATEGORY } },
+            include: { tag: true },
+          },
+        },
+      },
+    },
     orderBy: { createdAt: "asc" },
   });
 
@@ -55,13 +93,29 @@ export async function getTodoData() {
     tasksByList: Object.fromEntries(
       lists.map((list) => [
         list.id,
-        list.tasks.map(({ id, name, completed, details, dueDate }) => ({
+        list.tasks.map(
+          ({
+            id,
+            name,
+            completed,
+            details,
+            dueDate,
+            dueTimeMinutes,
+            dueDurationMinutes,
+            dueTimeZone,
+            tags,
+          }) => ({
           id,
           name,
           completed,
           details,
           dueDate: dueDate ? dueDate.toISOString() : null,
-        })),
+          dueTimeMinutes,
+          dueDurationMinutes,
+          dueTimeZone: normalizeDueTimeZone(dueTimeZone),
+          priority: getPriorityFromTaskTags(tags),
+        }),
+        ),
       ]),
     ),
   };

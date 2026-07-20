@@ -25,10 +25,34 @@ model Task {
   name      String
   completed Boolean   @default(false)
   details   String    @default("")
-  dueDate   DateTime?
-  position  Int       @default(0)
+  dueDate            DateTime?
+  dueTimeMinutes     Int?
+  dueDurationMinutes Int?
+  dueTimeZone        String    @default("floating")
+  position           Int       @default(0)
   listId    String
   list      TodoList  @relation(fields: [listId], references: [id], onDelete: Cascade)
+  tags      TaskTag[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+}
+
+model Tag {
+  id        String    @id @default(cuid())
+  slug      String    @unique
+  label     String
+  category  String    @default("priority")
+  level     Int?
+  tasks     TaskTag[]
+  createdAt DateTime  @default(now())
+}
+
+model TaskTag {
+  taskId    String
+  tagId     String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([taskId, tagId])
 }

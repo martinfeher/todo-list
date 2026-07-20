@@ -2,6 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+import { IoIosSearch } from "react-icons/io";
+import { LuPlus } from "react-icons/lu";
 import type { CompletedTask, SearchTask, TodoList } from "./todo-app";
 import { ConfirmModal } from "./confirm-modal";
 import { RenameListModal } from "./rename-list-modal";
@@ -26,13 +28,13 @@ type SidebarProps = {
   onSelectCompletedTask: (taskId: string, listId: string) => void;
   onSelectSearchTask: (taskId: string, listId: string) => void;
   onToggleTask: (taskId: string) => void;
-  onAddList: () => void;
+  onAddList: (name: string) => void;
   onRenameList: (listId: string, name: string) => void;
   onRemoveList: (listId: string) => void;
 };
 
 const itemClassName =
-  "flex w-full items-center text-left text-sm transition-colors";
+  "flex w-full items-center text-left text-sm transition-colors cursor-pointer";
 
 const completedItemClassName =
   "flex min-h-[44px] w-full flex-col items-start justify-center gap-0 px-4 py-1 text-left text-sm transition-colors";
@@ -69,6 +71,7 @@ export function Sidebar({
   const [openMenuListId, setOpenMenuListId] = useState<string | null>(null);
   const [renameList, setRenameList] = useState<TodoList | null>(null);
   const [removeList, setRemoveList] = useState<TodoList | null>(null);
+  const [isAddListOpen, setIsAddListOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -109,8 +112,11 @@ export function Sidebar({
                     ? () => setIsSearchOpen(true)
                     : undefined
               }
-              className={`${getItemClassName(label === "Today" && isTodaySelected)} px-4`}
+              className={`${getItemClassName(label === "Today" && isTodaySelected)} gap-2 px-4`}
             >
+              {label === "Search" ? (
+                <IoIosSearch className="size-[18px] shrink-0 cursor-pointer" aria-hidden="true" />
+              ) : null}
               {label}
             </button>
           ))}
@@ -139,7 +145,7 @@ export function Sidebar({
                   type="button"
                   aria-label={`Open menu for ${list.name}`}
                   aria-expanded={openMenuListId === list.id}
-                  className={`mr-1 flex size-7 items-center justify-center rounded-md text-zinc-500 transition-opacity hover:bg-zinc-300/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-50 ${
+                  className={`mr-1 flex size-7 items-center justify-center rounded-md text-zinc-500 transition-opacity hover:bg-zinc-300/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-50 cursor-pointer ${
                     openMenuListId === list.id
                       ? "opacity-100"
                       : "opacity-0 group-hover:opacity-100"
@@ -178,10 +184,11 @@ export function Sidebar({
 
           <button
             type="button"
-            className={`${getItemClassName(false)} px-4`}
-            onClick={onAddList}
+            className={`${getItemClassName(false)} gap-8 px-4 group hover:text-zinc-900`}
+            onClick={() => setIsAddListOpen(true)}
           >
             New list
+            <LuPlus className="size-3.5 text-zinc-350 group-hover:text-zinc-600 shrink-0" aria-hidden="true" />
           </button>
         </nav>
 
@@ -230,6 +237,17 @@ export function Sidebar({
         onClose={() => setIsSearchOpen(false)}
         onSelectTask={onSelectSearchTask}
         onToggleTask={onToggleTask}
+      />
+
+      <RenameListModal
+        open={isAddListOpen}
+        title="New list"
+        initialName=""
+        onConfirm={(name) => {
+          onAddList(name);
+          setIsAddListOpen(false);
+        }}
+        onCancel={() => setIsAddListOpen(false)}
       />
 
       <RenameListModal

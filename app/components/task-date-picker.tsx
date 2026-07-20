@@ -2,19 +2,39 @@
 
 import { useMemo, useState } from "react";
 import {
+  BiChevronDown,
   BiChevronLeft,
   BiChevronRight,
   BiRevision,
   BiSun,
   BiTimeFive,
 } from "react-icons/bi";
+import {
+  DURATION_OPTIONS,
+  formatDueTimeLabel,
+  getDefaultDueTimeDraft,
+  minutesToTimeInputValue,
+  normalizeDueTimeZone,
+  TIME_ZONE_OPTIONS,
+  timeInputValueToMinutes,
+  type DueTimeZone,
+  type TaskDueTime,
+} from "@/lib/task-due-time";
 
 type TaskDatePickerProps = {
   dueDate: string | null;
+  dueTimeMinutes?: number | null;
+  dueDurationMinutes?: number | null;
+  dueTimeZone?: string | null;
   onSelectDate: (dateValue: string) => void;
+  onSaveDueTime?: (dueTime: TaskDueTime) => void;
 };
 
-const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+const WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
+
+function getMondayFirstWeekdayIndex(date: Date) {
+  return (date.getDay() + 6) % 7;
+}
 
 function startOfDay(date: Date) {
   const next = new Date(date);
@@ -260,7 +280,7 @@ function getMonthDays(year: number, month: number, today: Date) {
     return [];
   }
 
-  const padding = visibleDays[0].getDay();
+  const padding = getMondayFirstWeekdayIndex(visibleDays[0]);
   const cells: (Date | null)[] = Array.from({ length: padding }, () => null);
   return [...cells, ...visibleDays];
 }
@@ -360,7 +380,104 @@ function MonthGrid({
   );
 }
 
-export function TaskDatePicker({ dueDate, onSelectDate }: TaskDatePickerProps) {
+function TaskTimeMenu({
+  initialDueTime,
+  onCancel,
+  onSave,
+}: {
+  initialDueTime: TaskDueTime;
+  onCancel: () => void;
+  onSave: (dueTime: TaskDueTime) => void;
+}) {
+  const [draft, setDraft] = useState<TaskDueTime>(initialDueTime);
+  const [timeInputValue, setTimeInputValue] = useState(() =>
+    minutesToTimeInputValue(initialDueTime.dueTimeMinutes),
+  );
+
+  function handleSave() {
+    const dueTimeMinutes = timeInputValueToMinutes(timeInputValue);
+    if (dueTimeMinutes === null) return;
+
+    onSave({
+      dueTimeMinutes,
+      dueDurationMinutes: draft.dueDurationMinutes,
+      dueTimeZone: draft.dueTimeZone,
+    });
+  }
+
+  return (
+    <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+      <div className="space-y-0 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
+        <div className="flex items-center justify-between gap-3 py-2">
+          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            Time
+          </span>
+          <input
+            type="time"
+            value={timeInputValue}
+            onChange={(event) => setTimeInputValue(event.target.value)}
+            className="w-[132px] rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-zinc-200 py-2 dark:border-zinc-700">
+          <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            Duration
+          </span>
+          <div className="relative w-[132px]">
+            <select
+              value={draft.dueDurationMinutes ?? ""}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraft((current) => ({
+                  ...current,
+                  dueDurationMinutes: value ? Number(value) : null,
+                }));
+              }}
+              className="w-full appearance-none rounded-lg border border-zinc-200 px-3 py-1.5 pr-8 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50"
+            >
+              {DURATION_OPTIONS.map((option) => (
+                <option
+                  key={option.label}
+                  value={option.value ?? ""}
+                >
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <BiChevronDown className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 px-4 py-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          className="rounded-lg bg-[#dc4c3e] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#c53727]"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function TaskDatePicker({
+  dueDate,
+  dueTimeMinutes = null,
+  dueDurationMinutes = null,
+  dueTimeZone = "floating",
+  onSelectDate,
+  onSaveDueTime,
+}: TaskDatePickerProps) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const selectedDate = fromDateValue(dueDate);
   const todayMonth = useMemo(
@@ -373,11 +490,10 @@ export function TaskDatePicker({ dueDate, onSelectDate }: TaskDatePickerProps) {
   const [dateInputFormat, setDateInputFormat] =
     useState<DateInputFormat>("european");
   const activeFormat = getDateFormatConfig(dateInputFormat);
-  const [viewMonth, setViewMonth] = useState(() => {
-    const base = selectedDate ?? today;
-    const baseMonth = new Date(base.getFullYear(), base.getMonth(), 1, 12, 0, 0, 0);
-    return baseMonth < todayMonth ? todayMonth : baseMonth;
-  });
+  const [viewMonth, setViewMonth] = useState(todayMonth);
+  const [isTimeMenuOpen, setIsTimeMenuOpen] = useState(false);
+  const timeButtonLabel =
+    formatDueTimeLabel(dueTimeMinutes) ?? "Time";
 
   const tomorrow = addDays(today, 1);
   const nextMonth = useMemo(
@@ -429,7 +545,11 @@ export function TaskDatePicker({ dueDate, onSelectDate }: TaskDatePickerProps) {
   ];
 
   return (
-    <div className="w-[280px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+    <div
+      className={`w-[280px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900 ${
+        isTimeMenuOpen ? "min-h-[648px]" : ""
+      }`}
+    >
       <div className="border-b border-zinc-200 px-3 py-2.5 dark:border-zinc-700">
         <input
           type="text"
@@ -539,15 +659,35 @@ export function TaskDatePicker({ dueDate, onSelectDate }: TaskDatePickerProps) {
       </div>
 
       <div className="space-y-2 border-t border-zinc-200 p-3 dark:border-zinc-700">
-        <button
-          type="button"
-          disabled
-          title="Coming soon"
-          className="flex w-full items-center justify-center gap-2 rounded-full border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-400 dark:border-zinc-700"
-        >
-          <BiTimeFive className="size-4" />
-          Time
-        </button>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setIsTimeMenuOpen((open) => !open)}
+            className={`flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors cursor-pointer ${
+              isTimeMenuOpen || dueTimeMinutes !== null
+                ? "border-zinc-300 bg-zinc-50 text-zinc-900 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-50"
+                : "border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800/80"
+            }`}
+          >
+            <BiTimeFive className="size-4" />
+            {timeButtonLabel}
+          </button>
+
+          {isTimeMenuOpen && onSaveDueTime ? (
+            <TaskTimeMenu
+              initialDueTime={getDefaultDueTimeDraft({
+                dueTimeMinutes,
+                dueDurationMinutes,
+                dueTimeZone: normalizeDueTimeZone(dueTimeZone),
+              })}
+              onCancel={() => setIsTimeMenuOpen(false)}
+              onSave={(dueTime) => {
+                onSaveDueTime(dueTime);
+                setIsTimeMenuOpen(false);
+              }}
+            />
+          ) : null}
+        </div>
         <button
           type="button"
           disabled

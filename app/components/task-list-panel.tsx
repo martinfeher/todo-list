@@ -1,9 +1,12 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { BiSortAlt2 } from "react-icons/bi";
+import { BiCalendar, BiSortAlt2 } from "react-icons/bi";
 import { InteractIcon } from "./line-control-icons";
+import { TaskDatePicker } from "./task-date-picker";
+import { ThreeDotsIcon } from "./three-dots-icon";
 import type { TaskListItem } from "./todo-app";
+import type { TaskDueTime } from "@/lib/task-due-time";
 import {
   getTaskDropIndex,
   getTaskRowElements,
@@ -128,6 +131,9 @@ type TaskListPanelProps = {
   onSelectTask: (taskId: string) => void;
   onRenameTask: (taskId: string, name: string) => void;
   onReorderTasks?: (listId: string, taskIds: string[]) => void;
+  onSetTaskDueDate?: (taskId: string, dateValue: string | null) => void;
+  onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
+  onSetTaskPriority?: (taskId: string, priority: number | null) => void;
 };
 
 export function TaskListPanel({
@@ -142,18 +148,30 @@ export function TaskListPanel({
   onSelectTask,
   onRenameTask,
   onReorderTasks,
+  onSetTaskDueDate,
+  onSetTaskDueTime,
+  onSetTaskPriority,
 }: TaskListPanelProps) {
   const [newTaskName, setNewTaskName] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const [orderedTasks, setOrderedTasks] = useState(tasks);
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+  const [openDatePickerTaskId, setOpenDatePickerTaskId] = useState<string | null>(
+    null,
+  );
+  const [openMenuTaskId, setOpenMenuTaskId] = useState<string | null>(null);
+  const [openPriorityMenuTaskId, setOpenPriorityMenuTaskId] = useState<
+    string | null
+  >(null);
   const [dropIndicator, setDropIndicator] = useState<DropIndicatorState | null>(
     null,
   );
   const titleInputRef = useRef<HTMLInputElement>(null);
   const titleEditReadyRef = useRef(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
+  const taskDateMenuRef = useRef<HTMLDivElement>(null);
+  const taskContextMenuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const dragStateRef = useRef<TaskDragState | null>(null);
 
@@ -166,7 +184,30 @@ export function TaskListPanel({
   useEffect(() => {
     setEditingTaskId(null);
     setTitleDraft("");
+    setOpenDatePickerTaskId(null);
+    setOpenMenuTaskId(null);
+    setOpenPriorityMenuTaskId(null);
   }, [title]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      const target = event.target as Node;
+
+      if (taskDateMenuRef.current?.contains(target)) return;
+      if (taskContextMenuRef.current?.contains(target)) return;
+
+      setOpenDatePickerTaskId(null);
+      setOpenMenuTaskId(null);
+      setOpenPriorityMenuTaskId(null);
+    }
+
+    if (!openDatePickerTaskId && !openMenuTaskId && !openPriorityMenuTaskId) return;
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [openDatePickerTaskId, openMenuTaskId, openPriorityMenuTaskId]);
 
   useEffect(() => {
     if (!editingTaskId) {
@@ -254,6 +295,47 @@ export function TaskListPanel({
     }
 
     setIsSortMenuOpen(false);
+  }
+
+  function toggleDatePicker(taskId: string) {
+    setOpenMenuTaskId(null);
+    setOpenPriorityMenuTaskId(null);
+    setOpenDatePickerTaskId((current) => (current === taskId ? null : taskId));
+  }
+
+  function toggleTaskMenu(taskId: string) {
+    setOpenDatePickerTaskId(null);
+    setOpenPriorityMenuTaskId(null);
+    setOpenMenuTaskId((current) => (current === taskId ? null : taskId));
+  }
+
+  function openPriorityMenu(taskId: string) {
+    setOpenMenuTaskId(null);
+    setOpenPriorityMenuTaskId(taskId);
+  }
+
+  function handleSelectTaskDueDate(taskId: string, dateValue: string) {
+    onSetTaskDueDate?.(taskId, dateValue);
+  }
+
+  function handleSaveTaskDueTime(taskId: string, dueTime: TaskDueTime) {
+    onSetTaskDueTime?.(taskId, dueTime);
+    setOpenDatePickerTaskId(null);
+  }
+
+  function handleClearTaskDueDate(taskId: string) {
+    onSetTaskDueDate?.(taskId, null);
+    setOpenMenuTaskId(null);
+  }
+
+  function handleSelectTaskPriority(taskId: string, priority: number) {
+    onSetTaskPriority?.(taskId, priority);
+    setOpenPriorityMenuTaskId(null);
+  }
+
+  function handleClearTaskPriority(taskId: string) {
+    onSetTaskPriority?.(taskId, null);
+    setOpenPriorityMenuTaskId(null);
   }
 
   function handleDragMove(event: PointerEvent) {
@@ -357,9 +439,7 @@ export function TaskListPanel({
 
   return (
     <section
-      className={`w-full shrink-0 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 max-w-[350px] ${
-        expanded ? "min-w-0 flex-1" : "max-w-[380px]"
-      }`}
+      className={`w-full shrink-0 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 max-w-[350px]`}
     >
       {title ? (
         <div className="flex flex-col">
@@ -391,7 +471,7 @@ export function TaskListPanel({
                 aria-haspopup="menu"
                 aria-expanded={isSortMenuOpen}
                 onClick={() => setIsSortMenuOpen((open) => !open)}
-                className="flex size-[31px] items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                className="flex size-[31px] items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:border-zinc-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
               >
                 <BiSortAlt2 className="size-[18px]" style={{ color: "#777777" }} />
               </button>
@@ -432,12 +512,17 @@ export function TaskListPanel({
             ) : (
               orderedTasks.map((task) => {
                 const dueDateLabel = formatTaskDueDateLabel(task.dueDate);
+                const isRowMenuOpen =
+                  openDatePickerTaskId === task.id ||
+                  openMenuTaskId === task.id ||
+                  openPriorityMenuTaskId === task.id;
 
                 return (
                   <li
                     key={task.id}
                     data-task-id={task.id}
-                    className={`flex min-h-[35px] items-center gap-2 border-b border-zinc-100 px-4 py-1 dark:border-zinc-900 cursor-pointer ${
+                    onClick={() =>onSelectTask(task.id)}
+                    className={`group flex min-h-[35px] items-center gap-2 border-b border-zinc-100 px-2 py-1 dark:border-zinc-900 cursor-pointer! ${
                       task.id === selectedTaskId
                         ? "bg-zinc-100 dark:bg-zinc-900"
                         : ""
@@ -448,13 +533,13 @@ export function TaskListPanel({
                         type="button"
                         aria-label="Drag task"
                         title="Drag to reorder task"
-                        className="flex size-[19px] shrink-0 cursor-grab touch-none items-center justify-center rounded-md border border-zinc-100 bg-white text-zinc-500 transition-colors hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-700 active:cursor-grabbing dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                        className="pointer-events-none flex size-[19px] shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-zinc-500 opacity-0 transition-opacity hover:border-zinc-300 hover:text-zinc-700 active:cursor-grabbing group-hover:pointer-events-auto group-hover:opacity-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
                         onPointerDown={(event) =>
                           handleTaskDragStart(event, task.id)
                         }
                         onClick={(event) => event.stopPropagation()}
                       >
-                        <InteractIcon className="size-2.5 text-[#aaaaaa]" />
+                        <InteractIcon className="size-3.5 text-[#949494]" />
                       </button>
                     ) : null}
 
@@ -499,11 +584,195 @@ export function TaskListPanel({
                         )}
                       </div>
                     )}
-                    {dueDateLabel && (
-                      <span className="shrink-0 text-xs text-zinc-400 dark:text-zinc-500">
-                        {dueDateLabel}
-                      </span>
-                    )}
+                    <div className="relative flex h-7 shrink-0 items-center justify-end">
+                      {dueDateLabel ? (
+                        <span
+                          className={`text-xs text-zinc-400 transition-opacity dark:text-zinc-500 ${
+                            isRowMenuOpen
+                              ? "opacity-0"
+                              : "group-hover:opacity-0"
+                          }`}
+                        >
+                          {dueDateLabel}
+                        </span>
+                      ) : null}
+
+                      <div
+                        className={`flex items-center gap-0.5 transition-opacity ${
+                          dueDateLabel ? "absolute right-0" : ""
+                        } ${
+                          isRowMenuOpen
+                            ? "pointer-events-auto opacity-100"
+                            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
+                        }`}
+                      >
+                      {onSetTaskDueDate ? (
+                        <div
+                          className="relative"
+                          ref={
+                            openDatePickerTaskId === task.id
+                              ? taskDateMenuRef
+                              : null
+                          }
+                        >
+                          <button
+                            type="button"
+                            aria-label={
+                              dueDateLabel
+                                ? `Due ${dueDateLabel}. Change date`
+                                : "Set task date"
+                            }
+                            aria-haspopup="dialog"
+                            aria-expanded={openDatePickerTaskId === task.id}
+                            title={
+                              dueDateLabel ? `Due: ${dueDateLabel}` : "Set date"
+                            }
+                            className={`flex w-[20px] h-[24px] items-center justify-center rounded-md text-zinc-400 transition-colors cursor-pointer hover:bg-zinc-200/80 hover:text-zinc-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 ${
+                              task.dueDate
+                                ? "text-zinc-400 dark:text-zinc-300"
+                                : ""
+                            }`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleDatePicker(task.id);
+                            }}
+                          >
+                            <BiCalendar className="size-4" />
+                          </button>
+
+                          {openDatePickerTaskId === task.id && (
+                            <div className="absolute right-0 top-full z-30 mt-1">
+                              <TaskDatePicker
+                                dueDate={task.dueDate}
+                                dueTimeMinutes={task.dueTimeMinutes}
+                                dueDurationMinutes={task.dueDurationMinutes}
+                                dueTimeZone={task.dueTimeZone}
+                                onSelectDate={(dateValue) =>
+                                  handleSelectTaskDueDate(task.id, dateValue)
+                                }
+                                onSaveDueTime={(dueTime) =>
+                                  handleSaveTaskDueTime(task.id, dueTime)
+                                }
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+
+                      <div
+                        className="relative"
+                        ref={
+                          openMenuTaskId === task.id ||
+                          openPriorityMenuTaskId === task.id
+                            ? taskContextMenuRef
+                            : null
+                        }
+                      >
+                        <button
+                          type="button"
+                          aria-label={`Open menu for ${task.name}`}
+                          aria-haspopup="menu"
+                          aria-expanded={
+                            openMenuTaskId === task.id ||
+                            openPriorityMenuTaskId === task.id
+                          }
+                          title="More options"
+                          className="flex w-[20px] h-[24px] items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-200/80 hover:text-zinc-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleTaskMenu(task.id);
+                          }}
+                        >
+                          <ThreeDotsIcon className="size-4" />
+                        </button>
+
+                        {openMenuTaskId === task.id && (
+                          <div
+                            role="menu"
+                            className="absolute right-0 top-full z-30 mt-1 w-36 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenMenuTaskId(null);
+                                startTitleEdit(task);
+                              }}
+                            >
+                              Rename
+                            </button>
+                            {onSetTaskPriority ? (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openPriorityMenu(task.id);
+                                }}
+                              >
+                                Add priority
+                              </button>
+                            ) : null}
+                            {task.dueDate && onSetTaskDueDate ? (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleClearTaskDueDate(task.id);
+                                }}
+                              >
+                                Clear date
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
+
+                        {openPriorityMenuTaskId === task.id && (
+                          <div
+                            role="menu"
+                            className="absolute right-0 top-full z-30 mt-1 w-36 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                          >
+                            {[1, 2, 3, 4].map((priority) => (
+                              <button
+                                key={priority}
+                                type="button"
+                                role="menuitem"
+                                className={`flex h-[35px] w-full items-center px-3 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                                  task.priority === priority
+                                    ? "font-medium text-zinc-900 dark:text-zinc-50"
+                                    : "text-zinc-900 dark:text-zinc-50"
+                                }`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleSelectTaskPriority(task.id, priority);
+                                }}
+                              >
+                                Priority {priority}
+                              </button>
+                            ))}
+                            {task.priority ? (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleClearTaskPriority(task.id);
+                                }}
+                              >
+                                Clear priority
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                      </div>
+                    </div>
                   </li>
                 );
               })

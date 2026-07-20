@@ -1,8 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { BiRedo, BiUndo } from "react-icons/bi";
-import { getTaskById, renameTask, updateTaskDetails, updateTaskDueDate } from "@/app/actions/todo";
+import { BiLink, BiRedo, BiUndo } from "react-icons/bi";
+import { getTaskById, renameTask, updateTaskDetails, updateTaskDueDate, updateTaskDueTime } from "@/app/actions/todo";
+import {
+  formatDueTimeLabel,
+  formatDurationLabel,
+  type TaskDueTime,
+} from "@/lib/task-due-time";
 import {
   applyBlockTypeToSelection,
   buildEditorHtmlFromTask,
@@ -13,13 +18,37 @@ import {
   getLineElementAtPoint,
   getLineElements,
   getLineIndex,
+  insertImagesIntoEditor,
   insertTypedLineBelowLine,
+  isCodeLine,
+  isDetailLineEmpty,
   type LineBlockType,
+  placeCaretInLine,
+  removeImageWrapper,
   reorderLine,
   splitEditorContent,
   splitLineAtCursor,
   syncLineEmptyState,
 } from "./detail-lines";
+import {
+  getImageFilesFromDataTransfer,
+  hasImageFilesInDataTransfer,
+  uploadImageFiles,
+} from "./detail-images";
+import {
+  getImageDragTarget,
+  startImagePointerInteraction,
+} from "./detail-image-drag";
+import {
+  getImageResizeHandle,
+  startImageResize,
+} from "./detail-image-resize";
+import {
+  applyLinkToSelection,
+  getLinkEditorState,
+  getLinkFromSelection,
+  normalizeLinks,
+} from "./detail-links";
 import { TaskDatePicker } from "./task-date-picker";
 import {
   BulletListIcon,
@@ -36,18 +65,24 @@ type TaskDetails = {
   completed: boolean;
   details: string;
   dueDate: string | null;
-};
-
-type DateMenuState = {
-  top: number;
-  left: number;
+  dueTimeMinutes: number | null;
+  dueDurationMinutes: number | null;
+  dueTimeZone: string;
 };
 
 type TaskDetailsPanelProps = {
   taskId: string | null;
   onDetailsSaved: (taskId: string, details: string) => void;
   onTaskRenamed: (taskId: string, name: string) => void;
-  onDueDateUpdated: (taskId: string, dueDate: string | null) => void;
+  onDueDateUpdated: (
+    taskId: string,
+    dueDate: string | null,
+    dueTime?: {
+      dueTimeMinutes: number | null;
+      dueDurationMinutes: number | null;
+      dueTimeZone: string;
+    },
+  ) => void;
 };
 
 type SaveStatus = "idle" | "loading" | "pending" | "saved" | "error";
@@ -86,6 +121,7 @@ const ADD_BLOCK_OPTIONS: { type: LineBlockType; label: string }[] = [
   { type: "h2", label: "Heading 2" },
   { type: "bullet", label: "Bullet list" },
   { type: "numbered", label: "Numbered list" },
+  { type: "code", label: "Code" },
 ];
 
 const AUTO_SAVE_DELAY_MS = 4000;
@@ -252,11 +288,15 @@ export function TaskDetailsPanel({
   const [formatMenu, setFormatMenu] = useState<FormatMenuState | null>(null);
   const [lineControls, setLineControls] = useState<LineControlsState | null>(null);
   const [dropIndicator, setDropIndicator] = useState<DropIndicatorState | null>(null);
+  const [isImageDropActive, setIsImageDropActive] = useState(false);
   const [addBlockMenu, setAddBlockMenu] = useState<AddBlockMenuState | null>(null);
-  const [dateMenu, setDateMenu] = useState<DateMenuState | null>(null);
+  const [isDateMenuOpen, setIsDateMenuOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
+  const [showLinkMenu, setShowLinkMenu] = useState(false);
+  const [linkText, setLinkText] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
   const savedDetailsRef = useRef("");
   const detailsRef = useRef("");
   const taskIdRef = useRef<string | null>(null);
@@ -266,6 +306,9 @@ export function TaskDetailsPanel({
   const editorWrapperRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const formatMenuRef = useRef<HTMLDivElement>(null);
+  const linkUrlInputRef = useRef<HTMLInputElement>(null);
+  const savedLinkSelectionRef = useRef<Range | null>(null);
+  const showLinkMenuRef = useRef(false);
   const addBlockMenuRef = useRef<HTMLDivElement>(null);
   const dateMenuRef = useRef<HTMLDivElement>(null);
   const dateButtonRef = useRef<HTMLButtonElement>(null);
@@ -285,6 +328,7 @@ export function TaskDetailsPanel({
   const historyIndexRef = useRef(-1);
   const isApplyingHistoryRef = useRef(false);
   const isReadyRef = useRef(false);
+  const imageDropDepthRef = useRef(0);
 
   const readEditorContent = useCallback(() => {
     return normalizeDetails(editorRef.current?.innerHTML ?? "");
@@ -454,24 +498,48 @@ export function TaskDetailsPanel({
   const closeFormatMenu = useCallback(() => {
     setFormatMenu(null);
     setShowColorMenu(false);
+    setShowLinkMenu(false);
+    showLinkMenuRef.current = false;
+    savedLinkSelectionRef.current = null;
+  }, []);
+
+  const restoreSavedLinkSelection = useCallback(() => {
+    const editor = editorRef.current;
+    const savedRange = savedLinkSelectionRef.current;
+    const selection = window.getSelection();
+
+    if (!editor || !savedRange || !selection) return;
+
+    editor.focus();
+    selection.removeAllRanges();
+    selection.addRange(savedRange);
   }, []);
 
   const updateFormatMenu = useCallback(() => {
+    if (showLinkMenuRef.current) return;
+
     const selection = window.getSelection();
     const editor = editorRef.current;
 
-    if (
-      !selection ||
-      selection.isCollapsed ||
-      !editor ||
-      !editor.contains(selection.anchorNode)
-    ) {
+    if (!selection || !editor || !editor.contains(selection.anchorNode)) {
       closeFormatMenu();
       return;
     }
 
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
+    let rect: DOMRect;
+
+    if (selection.isCollapsed) {
+      const link = getLinkFromSelection(selection, editor);
+      if (!link) {
+        closeFormatMenu();
+        return;
+      }
+
+      rect = link.getBoundingClientRect();
+    } else {
+      const range = selection.getRangeAt(0);
+      rect = range.getBoundingClientRect();
+    }
 
     if (rect.width === 0 && rect.height === 0) {
       closeFormatMenu();
@@ -490,6 +558,9 @@ export function TaskDetailsPanel({
       const editor = editorRef.current;
       if (!editor) return;
 
+      const activeLine = getActiveLineElement(editor);
+      if (isCodeLine(activeLine)) return;
+
       editor.focus();
 
       if (command === "highlight") {
@@ -506,10 +577,71 @@ export function TaskDetailsPanel({
     [closeFormatMenu, recordHistorySnapshot, scheduleAutoSave, syncEditorContent],
   );
 
+  const openLinkMenu = useCallback(() => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    if (!editor) return;
+
+    const activeLine = getActiveLineElement(editor);
+    if (isCodeLine(activeLine)) return;
+
+    if (selection && selection.rangeCount > 0) {
+      savedLinkSelectionRef.current = selection.getRangeAt(0).cloneRange();
+    } else {
+      savedLinkSelectionRef.current = null;
+    }
+
+    const state = getLinkEditorState(editor, selection);
+    setLinkText(state.text);
+    setLinkUrl(state.url);
+    showLinkMenuRef.current = true;
+    setShowLinkMenu(true);
+    setShowColorMenu(false);
+
+    requestAnimationFrame(() => {
+      linkUrlInputRef.current?.focus();
+      linkUrlInputRef.current?.select();
+    });
+  }, []);
+
+  const applyLink = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const activeLine = getActiveLineElement(editor);
+    if (isCodeLine(activeLine)) return;
+
+    if (!linkUrl.trim()) {
+      closeFormatMenu();
+      return;
+    }
+
+    editor.focus();
+    restoreSavedLinkSelection();
+    const applied = applyLinkToSelection(editor, linkUrl, linkText);
+    if (!applied) return;
+
+    syncEditorContent();
+    recordHistorySnapshot();
+    scheduleAutoSave();
+    closeFormatMenu();
+  }, [
+    closeFormatMenu,
+    linkText,
+    linkUrl,
+    recordHistorySnapshot,
+    restoreSavedLinkSelection,
+    scheduleAutoSave,
+    syncEditorContent,
+  ]);
+
   const applyTextColor = useCallback(
     (color: string) => {
       const editor = editorRef.current;
       if (!editor) return;
+
+      const activeLine = getActiveLineElement(editor);
+      if (isCodeLine(activeLine)) return;
 
       editor.focus();
       document.execCommand("styleWithCSS", false, "true");
@@ -625,7 +757,7 @@ export function TaskDetailsPanel({
       closeFormatMenu();
       setLineControls(null);
       setAddBlockMenu(null);
-      setDateMenu(null);
+      setIsDateMenuOpen(false);
       setCanUndo(false);
       setCanRedo(false);
       historyRef.current = [];
@@ -640,7 +772,7 @@ export function TaskDetailsPanel({
     closeFormatMenu();
     setLineControls(null);
     setAddBlockMenu(null);
-    setDateMenu(null);
+    setIsDateMenuOpen(false);
 
     void getTaskById(taskId)
       .then((loadedTask) => {
@@ -666,6 +798,9 @@ export function TaskDetailsPanel({
           dueDate: loadedTask.dueDate
             ? new Date(loadedTask.dueDate).toISOString()
             : null,
+          dueTimeMinutes: loadedTask.dueTimeMinutes,
+          dueDurationMinutes: loadedTask.dueDurationMinutes,
+          dueTimeZone: loadedTask.dueTimeZone,
         });
         savedDetailsRef.current = loadedDetails;
         detailsRef.current = editorHtml;
@@ -721,6 +856,7 @@ export function TaskDetailsPanel({
       document.removeEventListener("pointermove", handleDragMove);
       document.removeEventListener("pointerup", handleDragEnd);
       document.body.style.cursor = "";
+      document.body.style.userSelect = "";
     };
   }, []);
 
@@ -749,7 +885,7 @@ export function TaskDetailsPanel({
       }
 
       setAddBlockMenu(null);
-      setDateMenu(null);
+      setIsDateMenuOpen(false);
 
       if (!panelRef.current?.contains(target)) {
         closeFormatMenu();
@@ -812,6 +948,7 @@ export function TaskDetailsPanel({
     if (editor) {
       ensureBlockLines(editor);
       ensureTitleLine(editor);
+      normalizeLinks(editor);
       syncLineEmptyState(editor);
     }
 
@@ -832,6 +969,98 @@ export function TaskDetailsPanel({
 
     scheduleAutoSave();
     updateLineControls();
+  }
+
+  async function insertImagesFromFiles(
+    files: File[],
+    referenceLine?: HTMLElement | null,
+  ) {
+    const editor = editorRef.current;
+    const currentTaskId = taskIdRef.current;
+
+    if (!editor || files.length === 0 || !currentTaskId) return;
+
+    try {
+      const sources = await uploadImageFiles(currentTaskId, files);
+      await insertImagesIntoEditor(editor, sources, referenceLine);
+      syncEditorContent();
+      recordHistorySnapshot();
+      scheduleAutoSave();
+      void saveDetails();
+      updateLineControls();
+    } catch {
+      setSaveStatus("error");
+    }
+  }
+
+  function handleEditorPaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const activeLine = getActiveLineElement(editor);
+    if (isCodeLine(activeLine)) {
+      event.preventDefault();
+      const text = event.clipboardData.getData("text/plain");
+      if (!text) return;
+
+      editor.focus();
+      document.execCommand("insertText", false, text);
+      syncEditorContent();
+      recordHistorySnapshot();
+      scheduleAutoSave();
+      updateLineControls();
+      return;
+    }
+
+    const files = getImageFilesFromDataTransfer(event.clipboardData);
+    if (files.length === 0) return;
+
+    event.preventDefault();
+
+    void insertImagesFromFiles(files, activeLine);
+  }
+
+  function handleEditorDragEnter(event: React.DragEvent<HTMLDivElement>) {
+    if (!hasImageFilesInDataTransfer(event.dataTransfer)) return;
+
+    event.preventDefault();
+    imageDropDepthRef.current += 1;
+    setIsImageDropActive(true);
+  }
+
+  function handleEditorDragOver(event: React.DragEvent<HTMLDivElement>) {
+    if (!hasImageFilesInDataTransfer(event.dataTransfer)) return;
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsImageDropActive(true);
+  }
+
+  function handleEditorDragLeave(event: React.DragEvent<HTMLDivElement>) {
+    const relatedTarget = event.relatedTarget as Node | null;
+    if (relatedTarget && event.currentTarget.contains(relatedTarget)) return;
+
+    imageDropDepthRef.current -= 1;
+    if (imageDropDepthRef.current <= 0) {
+      imageDropDepthRef.current = 0;
+      setIsImageDropActive(false);
+    }
+  }
+
+  function handleEditorDrop(event: React.DragEvent<HTMLDivElement>) {
+    imageDropDepthRef.current = 0;
+    setIsImageDropActive(false);
+
+    const files = getImageFilesFromDataTransfer(event.dataTransfer);
+    if (files.length === 0) return;
+
+    event.preventDefault();
+
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const targetLine = getLineElementAtPoint(editor, event.clientY);
+    void insertImagesFromFiles(files, targetLine);
   }
 
   function handleEditorBlur(event: React.FocusEvent<HTMLDivElement>) {
@@ -894,7 +1123,26 @@ export function TaskDetailsPanel({
   }
 
   function handleEditorFocus() {
+    const editor = editorRef.current;
+    const activeLine = editor ? getActiveLineElement(editor) : null;
+
+    if (editor && activeLine && isDetailLineEmpty(activeLine)) {
+      placeCaretInLine(activeLine);
+    }
+
     updateLineControls();
+  }
+
+  function handleEditorMouseDown(event: React.MouseEvent<HTMLDivElement>) {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const line = getLineElementAtPoint(editor, event.clientY);
+    if (!line || !isDetailLineEmpty(line)) return;
+
+    requestAnimationFrame(() => {
+      placeCaretInLine(line);
+    });
   }
 
   function handlePlusClick(event: React.MouseEvent<HTMLButtonElement>) {
@@ -966,6 +1214,7 @@ export function TaskDetailsPanel({
     document.removeEventListener("pointermove", handleDragMove);
     document.removeEventListener("pointerup", handleDragEnd);
     document.body.style.cursor = "";
+    document.body.style.userSelect = "";
 
     dragState?.sourceLine.classList.remove("opacity-50");
     setDropIndicator(null);
@@ -990,17 +1239,11 @@ export function TaskDetailsPanel({
     dragStateRef.current = null;
   }
 
-  function handleLineDragStart(event: React.PointerEvent<HTMLButtonElement>) {
-    event.preventDefault();
-
+  function beginLineReorderDrag(line: HTMLElement) {
     const editor = editorRef.current;
     if (!editor) return;
 
     ensureBlockLines(editor);
-
-    const line =
-      activeLineControlsRef.current ?? getActiveLineElement(editor);
-    if (!line) return;
 
     const sourceIndex = getLineIndex(editor, line);
     if (sourceIndex <= 0) return;
@@ -1012,9 +1255,24 @@ export function TaskDetailsPanel({
     };
 
     line.classList.add("opacity-50");
+
     document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
     document.addEventListener("pointermove", handleDragMove);
     document.addEventListener("pointerup", handleDragEnd);
+  }
+
+  function handleLineDragStart(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const line =
+      activeLineControlsRef.current ?? getActiveLineElement(editor);
+    if (!line) return;
+
+    beginLineReorderDrag(line);
   }
 
   function handleEditorKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -1022,6 +1280,9 @@ export function TaskDetailsPanel({
       event.preventDefault();
       const editor = editorRef.current;
       if (!editor) return;
+
+      const activeLine = getActiveLineElement(editor);
+      if (!activeLine) return;
 
       splitLineAtCursor(editor);
       syncEditorContent();
@@ -1046,19 +1307,83 @@ export function TaskDetailsPanel({
     updateLineControls();
   }
 
-  function handleDateButtonClick() {
-    if (!task || !editorWrapperRef.current) return;
+  function handleEditorWrapperPointerDownCapture(
+    event: React.PointerEvent<HTMLDivElement>,
+  ) {
+    const target = event.target as HTMLElement;
 
-    if (dateMenu) {
-      setDateMenu(null);
+    const handle = getImageResizeHandle(target);
+    if (handle) {
+      const wrapper = target.closest(".detail-image-wrapper");
+      if (!(wrapper instanceof HTMLElement)) return;
+
+      startImageResize(event.nativeEvent, handle, wrapper, () => {
+        syncEditorContent();
+        recordHistorySnapshot();
+        scheduleAutoSave();
+        void saveDetails();
+      });
       return;
     }
 
-    const rect = editorWrapperRef.current.getBoundingClientRect();
-    setDateMenu({
-      top: rect.bottom + 6,
-      left: rect.left,
-    });
+    const dragTarget = getImageDragTarget(target);
+    if (!dragTarget) return;
+
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    event.preventDefault();
+
+    startImagePointerInteraction(
+      event.nativeEvent,
+      dragTarget.wrapper,
+      dragTarget.line,
+      editor,
+      () => {
+        syncEditorContent();
+        recordHistorySnapshot();
+        scheduleAutoSave();
+        void saveDetails();
+      },
+    );
+  }
+
+  function handleEditorClick(event: React.MouseEvent<HTMLDivElement>) {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const link = (event.target as HTMLElement).closest("a.detail-link");
+    if (link instanceof HTMLAnchorElement && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      window.open(link.href, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const deleteButton = (event.target as HTMLElement).closest(
+      ".detail-image-delete",
+    );
+    if (deleteButton) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const imageWrapper = deleteButton.closest(".detail-image-wrapper");
+      if (!(imageWrapper instanceof HTMLElement)) return;
+
+      const removed = removeImageWrapper(editor, imageWrapper);
+      if (!removed) return;
+
+      syncEditorContent();
+      recordHistorySnapshot();
+      scheduleAutoSave();
+      void saveDetails();
+      updateLineControls();
+      return;
+    }
+  }
+
+  function handleDateButtonClick() {
+    if (!task) return;
+    setIsDateMenuOpen((open) => !open);
   }
 
   async function handleSelectDueDate(dateValue: string) {
@@ -1075,10 +1400,39 @@ export function TaskDetailsPanel({
           ? {
               ...current,
               dueDate,
+              dueTimeMinutes: updated.dueTimeMinutes,
+              dueDurationMinutes: updated.dueDurationMinutes,
+              dueTimeZone: updated.dueTimeZone,
             }
           : current,
       );
-      onDueDateUpdated(task.id, dueDate);
+      onDueDateUpdated(task.id, dueDate, {
+        dueTimeMinutes: updated.dueTimeMinutes,
+        dueDurationMinutes: updated.dueDurationMinutes,
+        dueTimeZone: updated.dueTimeZone,
+      });
+    } catch {
+      return;
+    }
+  }
+
+  async function handleSaveDueTime(dueTime: TaskDueTime) {
+    if (!task) return;
+
+    try {
+      const updated = await updateTaskDueTime(task.id, dueTime);
+
+      setTask((current) =>
+        current
+          ? {
+              ...current,
+              dueTimeMinutes: updated.dueTimeMinutes,
+              dueDurationMinutes: updated.dueDurationMinutes,
+              dueTimeZone: updated.dueTimeZone,
+            }
+          : current,
+      );
+      setIsDateMenuOpen(false);
     } catch {
       return;
     }
@@ -1089,26 +1443,56 @@ export function TaskDetailsPanel({
       ref={panelRef}
       className="relative min-w-0 flex-1 bg-zinc-50 dark:bg-zinc-950"
     >
-      <div className="flex items-center justify-between p-4">
+      <div className="relative flex items-center justify-between overflow-visible p-4">
         <div className="flex items-center gap-3">
           {task ? (
             <>
-              <button
-                ref={dateButtonRef}
-                type="button"
-                aria-label="Set task date"
-                aria-haspopup="dialog"
-                aria-expanded={dateMenu !== null}
-                onClick={handleDateButtonClick}
-                className="flex cursor-pointer items-center gap-1 rounded-2xl bg-[#e8eff2] pl-3.5 pr-3 py-[7px] text-[12px] font-semibold uppercase tracking-wide text-zinc-700 transition-colors hover:bg-[#e0e2e5] dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-              >
-                <span>Date</span>
-                <PlusIcon className="ml-1 size-3 text-[#5F5F5F]" />
-              </button>
+              <div className="relative">
+                <button
+                  ref={dateButtonRef}
+                  type="button"
+                  aria-label="Set task date"
+                  aria-haspopup="dialog"
+                  aria-expanded={isDateMenuOpen}
+                  onClick={handleDateButtonClick}
+                  className="flex cursor-pointer items-center gap-1 rounded-2xl bg-[#e8eff2] pl-3.5 pr-3 py-[7px] text-[12px] font-semibold uppercase tracking-wide text-zinc-700 transition-colors hover:bg-[#e0e2e5] dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                >
+                  <span>Date</span>
+                  <PlusIcon className="ml-1 size-3 text-[#5F5F5F]" />
+                </button>
+
+                {isDateMenuOpen && (
+                  <div
+                    ref={dateMenuRef}
+                    className="absolute left-0 top-full z-50 mt-1.5"
+                  >
+                    <TaskDatePicker
+                      dueDate={task.dueDate}
+                      dueTimeMinutes={task.dueTimeMinutes}
+                      dueDurationMinutes={task.dueDurationMinutes}
+                      dueTimeZone={task.dueTimeZone}
+                      onSelectDate={(dateValue) =>
+                        void handleSelectDueDate(dateValue)
+                      }
+                      onSaveDueTime={(dueTime) => void handleSaveDueTime(dueTime)}
+                    />
+                  </div>
+                )}
+              </div>
               {task.dueDate && formatDueDateLabel(task.dueDate) && (
-                <p className="text-[13px] text-zinc-500 dark:text-zinc-400 cursor-pointer" onClick={handleDateButtonClick}>
-                  {formatDueDateLabel(task.dueDate)}
-                </p>
+                <div
+                  className="cursor-pointer text-[13px] text-zinc-500 dark:text-zinc-400"
+                  onClick={handleDateButtonClick}
+                >
+                  <div className="flex flex-col items-end text-right">
+                    <p>{formatDueDateLabel(task.dueDate)}</p>
+                    {formatDueTimeLabel(task.dueTimeMinutes) && (
+                      <p className="text-[10px]">
+                        {formatDueTimeLabel(task.dueTimeMinutes)}
+                      </p>
+                    )}
+                  </div>
+                </div>
               )}
               <span className="text-[#c0c0c0] ml-2">|</span>
               <div className="flex items-center overflow-hidden rounded">
@@ -1166,18 +1550,14 @@ export function TaskDetailsPanel({
             onMouseEnter={handleEditorWrapperMouseEnter}
             onMouseLeave={handleEditorWrapperMouseLeave}
             onMouseMove={handleEditorWrapperMouseMove}
+            onDragEnter={handleEditorDragEnter}
+            onDragOver={handleEditorDragOver}
+            onDragLeave={handleEditorDragLeave}
+            onDrop={handleEditorDrop}
+            onPointerDownCapture={handleEditorWrapperPointerDownCapture}
           >
-            {dateMenu && (
-              <div
-                ref={dateMenuRef}
-                className="fixed z-50"
-                style={{ top: dateMenu.top, left: dateMenu.left }}
-              >
-                <TaskDatePicker
-                  dueDate={task.dueDate}
-                  onSelectDate={(dateValue) => void handleSelectDueDate(dateValue)}
-                />
-              </div>
+            {isImageDropActive && (
+              <div className="pointer-events-none absolute inset-0 z-30 rounded-md border-2 border-dashed border-blue-400 bg-blue-50/40 dark:border-blue-500 dark:bg-blue-950/20" />
             )}
 
             <div
@@ -1185,13 +1565,16 @@ export function TaskDetailsPanel({
               contentEditable
               suppressContentEditableWarning
               onInput={handleEditorInput}
+              onPaste={handleEditorPaste}
               onBlur={handleEditorBlur}
               onFocus={handleEditorFocus}
               onMouseUp={handleEditorMouseUp}
+              onMouseDown={handleEditorMouseDown}
+              onClick={handleEditorClick}
               onKeyDown={handleEditorKeyDown}
               onKeyUp={handleEditorKeyUp}
               onScroll={updateLineControls}
-              className="min-h-[280px] w-full resize-y overflow-auto py-2 pl-10 pr-3 text-[1.05rem] leading-[1.5rem] text-[#333333] outline-none dark:text-[#333333] [&_.detail-line[data-line-type=bullet]]:pl-1 [&_.detail-line[data-line-type=checklist]]:pl-1 [&_.detail-line[data-line-type=h1]]:text-[1.875rem] [&_.detail-line[data-line-type=h1]]:font-bold [&_.detail-line[data-line-type=h1]]:leading-[2.25rem] [&_.detail-line[data-line-type=h2]]:text-[1.3125rem] [&_.detail-line[data-line-type=h2]]:font-semibold [&_.detail-line[data-line-type=h2]]:leading-[1.6875rem] [&_.detail-line[data-line-type=numbered]]:pl-1 [&_.detail-line]:relative [&_.detail-line]:flex [&_.detail-line]:min-h-[1.5rem] [&_.detail-line]:items-center [&_.detail-line[data-empty=true]:before]:absolute [&_.detail-line[data-empty=true]:before]:left-0 [&_mark]:bg-yellow-200 [&_s]:line-through [&_strike]:line-through [&_u]:underline"
+              className="task-details-editor min-h-[650px] reounded-xl w-full resize-y overflow-auto bg-white py-2 pl-10 pr-3 text-[1.05rem] leading-[1.5rem] text-[#333333] outline-none dark:bg-white dark:text-[#333333] [&_.detail-line[data-line-type=bullet]]:pl-1 [&_.detail-line[data-line-type=checklist]]:pl-1 [&_.detail-line[data-line-type=h1]]:text-[1.875rem] [&_.detail-line[data-line-type=h1]]:font-bold [&_.detail-line[data-line-type=h1]]:leading-[2.25rem] [&_.detail-line[data-line-type=h2]]:text-[1.3125rem] [&_.detail-line[data-line-type=h2]]:font-semibold [&_.detail-line[data-line-type=h2]]:leading-[1.6875rem] [&_.detail-line[data-line-type=numbered]]:pl-1 [&_mark]:bg-yellow-200 [&_s]:line-through [&_strike]:line-through [&_u]:underline"
             />
 
             {dropIndicator && (
@@ -1263,113 +1646,155 @@ export function TaskDetailsPanel({
       {formatMenu && (
         <div
           ref={formatMenuRef}
-          className="fixed z-50 -translate-x-1/2 -translate-y-full rounded-md border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+          className="fixed z-50 min-w-[240px] -translate-x-1/2 -translate-y-full rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
           style={{ left: formatMenu.x, top: formatMenu.y }}
         >
-          <div className="flex gap-1">
-          <button
-            type="button"
-            className="h-[30px] rounded px-3 text-sm font-bold text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => applyFormat("bold")}
-          >
-            B
-          </button>
-          <button
-            type="button"
-            className="h-[30px] rounded px-3 text-sm italic text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => applyFormat("italic")}
-          >
-            I
-          </button>
-          <button
-            type="button"
-            className="h-[30px] rounded px-3 text-sm text-zinc-900 underline hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => applyFormat("underline")}
-          >
-            U
-          </button>
-          <button
-            type="button"
-            className="h-[30px] rounded px-3 text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => applyFormat("highlight")}
-          >
-            <span className="rounded-sm bg-yellow-200 px-1 dark:bg-yellow-300 dark:text-zinc-900">
-              H
-            </span>
-          </button>
-          <button
-            type="button"
-            className="h-[30px] rounded px-3 text-sm text-zinc-900 line-through hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => applyFormat("strikeThrough")}
-          >
-            S
-          </button>
+          {showLinkMenu ? (
+            <input
+              ref={linkUrlInputRef}
+              type="text"
+              value={linkUrl}
+              onChange={(event) => setLinkUrl(event.target.value)}
+              placeholder="Paste or type a link"
+              aria-label="Link URL"
+              className="m-1 w-[calc(100%-0.5rem)] rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+              onMouseDown={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  applyLink();
+                }
 
-          <div
-            aria-hidden="true"
-            className="mx-0.5 w-px self-stretch bg-zinc-200 dark:bg-zinc-700"
-          />
-
-          <button
-            type="button"
-            aria-label="Text color"
-            title="Text color"
-            aria-expanded={showColorMenu}
-            className={`relative flex h-[30px] min-w-[30px] items-center justify-center rounded px-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-              showColorMenu ? "bg-zinc-100 dark:bg-zinc-800" : ""
-            }`}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => setShowColorMenu((open) => !open)}
-          >
-            <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-              A
-            </span>
-            <span
-              className="absolute bottom-1 left-1.5 right-1.5 h-0.5 rounded-full"
-              style={{ backgroundColor: DEFAULT_TEXT_COLOR }}
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeFormatMenu();
+                }
+              }}
             />
-          </button>
-
-          <div
-            aria-hidden="true"
-            className="mx-0.5 w-px self-stretch bg-zinc-200 dark:bg-zinc-700"
-          />
-
-          {FORMAT_LIST_OPTIONS.map(({ type, label, Icon }) => (
-            <button
-              key={type}
-              type="button"
-              aria-label={label}
-              title={label}
-              className="flex h-[30px] w-[30px] items-center justify-center rounded text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => applyLineBlockType(type)}
-            >
-              <Icon className="size-4" />
-            </button>
-          ))}
-          </div>
-
-          {showColorMenu && (
-            <div className="mt-1 flex items-center gap-1 border-t border-zinc-200 pt-1 dark:border-zinc-700">
-              {TEXT_COLOR_OPTIONS.map((option) => (
+          ) : (
+            <>
+              <div className="flex gap-1 p-1">
                 <button
-                  key={option.value}
                   type="button"
-                  aria-label={option.label}
-                  title={option.label}
-                  className="size-5 rounded-full border border-zinc-200 transition-transform hover:scale-110 dark:border-zinc-600"
-                  style={{ backgroundColor: option.value }}
+                  className="h-[30px] rounded px-3 text-sm font-bold text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => applyTextColor(option.value)}
+                  onClick={() => applyFormat("bold")}
+                >
+                  B
+                </button>
+                <button
+                  type="button"
+                  className="h-[30px] rounded px-3 text-sm italic text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => applyFormat("italic")}
+                >
+                  I
+                </button>
+                <button
+                  type="button"
+                  className="h-[30px] rounded px-3 text-sm text-zinc-900 underline hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => applyFormat("underline")}
+                >
+                  U
+                </button>
+                <button
+                  type="button"
+                  className="h-[30px] rounded px-3 text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => applyFormat("highlight")}
+                >
+                  <span className="rounded-sm bg-yellow-200 px-1 dark:bg-yellow-300 dark:text-zinc-900">
+                    H
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="h-[30px] rounded px-3 text-sm text-zinc-900 line-through hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => applyFormat("strikeThrough")}
+                >
+                  S
+                </button>
+
+                <div
+                  aria-hidden="true"
+                  className="mx-0.5 w-px self-stretch bg-zinc-200 dark:bg-zinc-700"
                 />
-              ))}
-            </div>
+
+                <button
+                  type="button"
+                  aria-label="Add link"
+                  title="Add link"
+                  className="flex h-[30px] w-[30px] items-center justify-center rounded text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={openLinkMenu}
+                >
+                  <BiLink className="size-4" />
+                </button>
+
+                <div
+                  aria-hidden="true"
+                  className="mx-0.5 w-px self-stretch bg-zinc-200 dark:bg-zinc-700"
+                />
+
+                <button
+                  type="button"
+                  aria-label="Text color"
+                  title="Text color"
+                  aria-expanded={showColorMenu}
+                  className={`relative flex h-[30px] min-w-[30px] items-center justify-center rounded px-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                    showColorMenu ? "bg-zinc-100 dark:bg-zinc-800" : ""
+                  }`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setShowColorMenu((open) => !open)}
+                >
+                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                    A
+                  </span>
+                  <span
+                    className="absolute bottom-1 left-1.5 right-1.5 h-0.5 rounded-full"
+                    style={{ backgroundColor: DEFAULT_TEXT_COLOR }}
+                  />
+                </button>
+
+                <div
+                  aria-hidden="true"
+                  className="mx-0.5 w-px self-stretch bg-zinc-200 dark:bg-zinc-700"
+                />
+
+                {FORMAT_LIST_OPTIONS.map(({ type, label, Icon }) => (
+                  <button
+                    key={type}
+                    type="button"
+                    aria-label={label}
+                    title={label}
+                    className="flex h-[30px] w-[30px] items-center justify-center rounded text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => applyLineBlockType(type)}
+                  >
+                    <Icon className="size-4" />
+                  </button>
+                ))}
+              </div>
+
+              {showColorMenu && (
+                <div className="mx-1 mb-1 flex items-center gap-1 border-t border-zinc-200 pt-1 dark:border-zinc-700">
+                  {TEXT_COLOR_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-label={option.label}
+                      title={option.label}
+                      className="size-5 rounded-full border border-zinc-200 transition-transform hover:scale-110 dark:border-zinc-600"
+                      style={{ backgroundColor: option.value }}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => applyTextColor(option.value)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

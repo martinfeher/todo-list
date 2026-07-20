@@ -40,6 +40,9 @@ yarn-error.log*
 /dev.db-journal
 /app/generated/prisma
 
+# uploaded task images
+/uploads
+
 # vercel
 .vercel
 

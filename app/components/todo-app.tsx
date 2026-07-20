@@ -9,7 +9,11 @@ import {
   renameTodoList,
   reorderTasks as reorderTasksInDb,
   toggleTask as toggleTaskInDb,
+  updateTaskDueDate as updateTaskDueDateInDb,
+  updateTaskDueTime as updateTaskDueTimeInDb,
+  updateTaskPriority as updateTaskPriorityInDb,
 } from "@/app/actions/todo";
+import type { TaskDueTime } from "@/lib/task-due-time";
 import { Sidebar } from "./sidebar";
 import { TaskDetailsPanel } from "./task-details-panel";
 import { TaskListPanel } from "./task-list-panel";
@@ -22,6 +26,10 @@ export type Task = {
   completed: boolean;
   details: string;
   dueDate: string | null;
+  dueTimeMinutes: number | null;
+  dueDurationMinutes: number | null;
+  dueTimeZone: string;
+  priority: number | null;
 };
 
 export type TodoList = {
@@ -181,8 +189,10 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
     setSelectedTaskId(taskId);
   }
 
-  async function addList() {
-    const list = await createTodoList(`List ${lists.length + 1}`);
+  async function addList(name: string) {
+    if (!name.trim()) return;
+
+    const list = await createTodoList(name.trim());
     setLists((current) => [...current, { id: list.id, name: list.name }]);
     setTasksByList((current) => ({ ...current, [list.id]: [] }));
     setActiveView(null);
@@ -229,6 +239,10 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
       completed: task.completed,
       details: task.details,
       dueDate: null,
+      dueTimeMinutes: null,
+      dueDurationMinutes: null,
+      dueTimeZone: "floating",
+      priority: null,
     };
 
     setTasksByList((current) => ({
@@ -325,13 +339,44 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
   }, []);
 
   const handleDueDateUpdated = useCallback(
-    (taskId: string, dueDate: string | null) => {
+    (
+      taskId: string,
+      dueDate: string | null,
+      dueTime?: {
+        dueTimeMinutes: number | null;
+        dueDurationMinutes: number | null;
+        dueTimeZone: string;
+      },
+    ) => {
       setTasksByList((current) => {
         const next = { ...current };
 
         for (const listId of Object.keys(next)) {
           next[listId] = next[listId].map((task) =>
-            task.id === taskId ? { ...task, dueDate } : task,
+            task.id === taskId
+              ? {
+                  ...task,
+                  dueDate,
+                  ...(dueTime ?? {}),
+                }
+              : task,
+          );
+        }
+
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handlePriorityUpdated = useCallback(
+    (taskId: string, priority: number | null) => {
+      setTasksByList((current) => {
+        const next = { ...current };
+
+        for (const listId of Object.keys(next)) {
+          next[listId] = next[listId].map((task) =>
+            task.id === taskId ? { ...task, priority } : task,
           );
         }
 
@@ -344,6 +389,57 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
   async function renameTask(taskId: string, name: string) {
     const updatedTask = await renameTaskInDb(taskId, name);
     handleTaskRenamed(taskId, updatedTask.name);
+  }
+
+  const handleDueTimeUpdated = useCallback(
+    (taskId: string, dueTime: TaskDueTime) => {
+      setTasksByList((current) => {
+        const next = { ...current };
+
+        for (const listId of Object.keys(next)) {
+          next[listId] = next[listId].map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  dueTimeMinutes: dueTime.dueTimeMinutes,
+                  dueDurationMinutes: dueTime.dueDurationMinutes,
+                  dueTimeZone: dueTime.dueTimeZone,
+                }
+              : task,
+          );
+        }
+
+        return next;
+      });
+    },
+    [],
+  );
+
+  async function setTaskDueTime(taskId: string, dueTime: TaskDueTime) {
+    const updated = await updateTaskDueTimeInDb(taskId, dueTime);
+    handleDueTimeUpdated(taskId, {
+      dueTimeMinutes: updated.dueTimeMinutes,
+      dueDurationMinutes: updated.dueDurationMinutes,
+      dueTimeZone: updated.dueTimeZone,
+    });
+  }
+
+  async function setTaskDueDate(taskId: string, dateValue: string | null) {
+    const updated = await updateTaskDueDateInDb(taskId, dateValue);
+    const dueDate = updated.dueDate
+      ? new Date(updated.dueDate).toISOString()
+      : null;
+
+    handleDueDateUpdated(taskId, dueDate, {
+      dueTimeMinutes: updated.dueTimeMinutes,
+      dueDurationMinutes: updated.dueDurationMinutes,
+      dueTimeZone: updated.dueTimeZone,
+    });
+  }
+
+  async function setTaskPriority(taskId: string, priority: number | null) {
+    const updated = await updateTaskPriorityInDb(taskId, priority);
+    handlePriorityUpdated(taskId, updated.priority);
   }
 
   async function reorderTasks(listId: string, activeTaskIds: string[]) {
@@ -403,6 +499,9 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
           onSelectTask={setSelectedTaskId}
           onRenameTask={renameTask}
           onReorderTasks={reorderTasks}
+          onSetTaskDueDate={setTaskDueDate}
+          onSetTaskDueTime={setTaskDueTime}
+          onSetTaskPriority={setTaskPriority}
         />
         {showDetailsPanel && (
           <TaskDetailsPanel

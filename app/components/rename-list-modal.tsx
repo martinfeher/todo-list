@@ -1,26 +1,35 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 type RenameListModalProps = {
   open: boolean;
-  initialName: string;
+  title?: string;
+  initialName?: string;
+  confirmLabel?: string;
   onConfirm: (name: string) => void;
   onCancel: () => void;
 };
 
 export function RenameListModal({
   open,
-  initialName,
+  title = "Rename list",
+  initialName = "",
+  confirmLabel = "Save",
   onConfirm,
   onCancel,
 }: RenameListModalProps) {
   const [name, setName] = useState(initialName);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setName(initialName);
-    }
+    if (!open) return;
+
+    setName(initialName);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
   }, [open, initialName]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -36,17 +45,18 @@ export function RenameListModal({
       <form
         role="dialog"
         aria-modal="true"
-        aria-labelledby="rename-modal-title"
+        aria-labelledby="list-name-modal-title"
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900"
       >
         <h2
-          id="rename-modal-title"
+          id="list-name-modal-title"
           className="text-lg font-semibold text-zinc-900 dark:text-zinc-50"
         >
-          Rename list
+          {title}
         </h2>
         <input
+          ref={inputRef}
           type="text"
           value={name}
           onChange={(event) => setName(event.target.value)}
@@ -66,7 +76,7 @@ export function RenameListModal({
             disabled={!name.trim()}
             className="h-[35px] rounded-md bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
-            Save
+            {confirmLabel}
           </button>
         </div>
       </form>
