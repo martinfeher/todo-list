@@ -184,11 +184,11 @@ export function Sidebar({
 
           <button
             type="button"
-            className={`${getItemClassName(false)} gap-8 px-4 group hover:text-zinc-900`}
+            className={`${getItemClassName(false)} gap-4 px-4 group hover:text-zinc-900`}
             onClick={() => setIsAddListOpen(true)}
           >
             New list
-            <LuPlus className="size-3.5 text-zinc-350 group-hover:text-zinc-600 shrink-0" aria-hidden="true" />
+            <LuPlus className="size-3.5 text-zinc-250 group-hover:text-zinc-600 shrink-0" aria-hidden="true" />
           </button>
         </nav>
 
