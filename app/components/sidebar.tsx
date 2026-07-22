@@ -14,7 +14,7 @@ const SearchModal = dynamic(
   { ssr: false },
 );
 
-const NAV_ITEMS = ["Search", "Important", "Today"] as const;
+const NAV_ITEMS = ["Search", "Important", "Today", "Calendar"] as const;
 
 type SidebarProps = {
   lists: TodoList[];
@@ -22,9 +22,11 @@ type SidebarProps = {
   searchTasks: SearchTask[];
   selectedListId: string | null;
   isTodaySelected: boolean;
+  isCalendarSelected: boolean;
   selectedTaskId: string | null;
   onSelectList: (listId: string) => void;
   onSelectToday: () => void;
+  onSelectCalendar: () => void;
   onSelectCompletedTask: (taskId: string, listId: string) => void;
   onSelectSearchTask: (taskId: string, listId: string) => void;
   onToggleTask: (taskId: string) => void;
@@ -56,9 +58,11 @@ export function Sidebar({
   searchTasks,
   selectedListId,
   isTodaySelected,
+  isCalendarSelected,
   selectedTaskId,
   onSelectList,
   onSelectToday,
+  onSelectCalendar,
   onSelectCompletedTask,
   onSelectSearchTask,
   onToggleTask,
@@ -108,11 +112,16 @@ export function Sidebar({
               onClick={
                 label === "Today"
                   ? onSelectToday
-                  : label === "Search"
-                    ? () => setIsSearchOpen(true)
-                    : undefined
+                  : label === "Calendar"
+                    ? onSelectCalendar
+                    : label === "Search"
+                      ? () => setIsSearchOpen(true)
+                      : undefined
               }
-              className={`${getItemClassName(label === "Today" && isTodaySelected)} gap-2 px-4`}
+              className={`${getItemClassName(
+                (label === "Today" && isTodaySelected) ||
+                  (label === "Calendar" && isCalendarSelected),
+              )} gap-2 px-4`}
             >
               {label === "Search" ? (
                 <IoIosSearch className="size-[18px] shrink-0 cursor-pointer" aria-hidden="true" />
@@ -127,7 +136,9 @@ export function Sidebar({
             <div
               key={list.id}
               className={`group relative flex h-[35px] items-center cursor-pointer ${
-                !isTodaySelected && list.id === selectedListId
+                !isTodaySelected &&
+                !isCalendarSelected &&
+                list.id === selectedListId
                   ? "bg-zinc-200/80 dark:bg-zinc-800"
                   : "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60"
               }`}
@@ -190,9 +201,7 @@ export function Sidebar({
             New list
             <LuPlus className="size-3.5 text-zinc-250 group-hover:text-zinc-600 shrink-0" aria-hidden="true" />
           </button>
-        </nav>
 
-        <div className="mt-auto border-t border-zinc-200 dark:border-zinc-800">
           <button
             type="button"
             className={`${getItemClassName(isCompletedOpen)} px-4`}
@@ -228,7 +237,7 @@ export function Sidebar({
                 ))}
               </div>
             ))}
-        </div>
+        </nav>
       </aside>
 
       <SearchModal

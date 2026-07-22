@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { BiCalendar, BiSortAlt2 } from "react-icons/bi";
+import { LuPlus } from "react-icons/lu";
 import { InteractIcon } from "./line-control-icons";
 import { TaskDatePicker } from "./task-date-picker";
 import { ThreeDotsIcon } from "./three-dots-icon";
@@ -124,6 +125,8 @@ type TaskListPanelProps = {
   tasks: TaskListItem[];
   selectedTaskId: string | null;
   expanded?: boolean;
+  embedded?: boolean;
+  showHeader?: boolean;
   showAddTask?: boolean;
   listId?: string | null;
   onAddTask: (name: string) => void;
@@ -141,6 +144,8 @@ export function TaskListPanel({
   tasks,
   selectedTaskId,
   expanded = false,
+  embedded = false,
+  showHeader = true,
   showAddTask = false,
   listId = null,
   onAddTask,
@@ -153,6 +158,7 @@ export function TaskListPanel({
   onSetTaskPriority,
 }: TaskListPanelProps) {
   const [newTaskName, setNewTaskName] = useState("");
+  const [isAddingTask, setIsAddingTask] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const [orderedTasks, setOrderedTasks] = useState(tasks);
@@ -168,6 +174,7 @@ export function TaskListPanel({
     null,
   );
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const newTaskInputRef = useRef<HTMLInputElement>(null);
   const titleEditReadyRef = useRef(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
   const taskDateMenuRef = useRef<HTMLDivElement>(null);
@@ -187,6 +194,8 @@ export function TaskListPanel({
     setOpenDatePickerTaskId(null);
     setOpenMenuTaskId(null);
     setOpenPriorityMenuTaskId(null);
+    setIsAddingTask(false);
+    setNewTaskName("");
   }, [title]);
 
   useEffect(() => {
@@ -237,10 +246,25 @@ export function TaskListPanel({
     };
   }, [isSortMenuOpen]);
 
+  useEffect(() => {
+    if (!isAddingTask) return;
+
+    requestAnimationFrame(() => {
+      newTaskInputRef.current?.focus();
+    });
+  }, [isAddingTask]);
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!newTaskName.trim()) {
+      setIsAddingTask(false);
+      setNewTaskName("");
+      return;
+    }
+
     onAddTask(newTaskName);
     setNewTaskName("");
+    setIsAddingTask(false);
   }
 
   function startTitleEdit(task: TaskListItem) {
@@ -439,27 +463,56 @@ export function TaskListPanel({
 
   return (
     <section
-      className={`w-full shrink-0 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 max-w-[350px]`}
+      className={`shrink-0 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 ${
+        embedded ? "w-[350px]" : "w-full max-w-[350px]"
+      }`}
     >
       {title ? (
         <div className="flex flex-col">
-          <header className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-              {title}
-            </h1>
-          </header>
+          {showHeader && (
+            <header className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+              <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+                {title}
+              </h1>
+            </header>
+          )}
 
-          <div className="flex items-center gap-2 px-4 py-3">
+          <div className="flex items-center justify-between gap-2 px-4 py-3">
             {showAddTask ? (
-              <form onSubmit={handleSubmit} className="min-w-0 flex-1">
-                <input
-                  type="text"
-                  value={newTaskName}
-                  onChange={(event) => setNewTaskName(event.target.value)}
-                  placeholder="Add New Task"
-                  className="h-[35px] w-full rounded-[7px] border border-zinc-300 bg-white px-3 text-sm text-zinc-900 max-w-[230px] outline-none focus:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-zinc-500"
-                />
-              </form>
+              isAddingTask ? (
+                <form onSubmit={handleSubmit} className="min-w-0 flex-1">
+                  <input
+                    ref={newTaskInputRef}
+                    type="text"
+                    value={newTaskName}
+                    onChange={(event) => setNewTaskName(event.target.value)}
+                    placeholder="Task name"
+                    aria-label="Task name"
+                    className="h-[35px] w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 max-w-[230px] outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-zinc-500"
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setIsAddingTask(false);
+                        setNewTaskName("");
+                      }
+                    }}
+                    onBlur={() => {
+                      if (!newTaskName.trim()) {
+                        setIsAddingTask(false);
+                      }
+                    }}
+                  />
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsAddingTask(true)}
+                  className="flex h-[33px] items-center gap-2 rounded-lg bg-[#4873c7] pl-[13px] pr-[15px] text-sm font-medium text-white transition-colors cursor-pointer hover:bg-[#3f68bd]"
+                >
+                  <LuPlus className="size-4" aria-hidden="true" />
+                  Add task
+                </button>
+              )
             ) : (
               <div className="flex-1" />
             )}
@@ -507,7 +560,11 @@ export function TaskListPanel({
 
             {orderedTasks.length === 0 ? (
               <li className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">
-                {title === "Today" ? "No tasks for today" : "No tasks"}
+                {title === "Today"
+                  ? "No tasks for today"
+                  : title === "Calendar"
+                    ? "No scheduled tasks"
+                    : "No tasks"}
               </li>
             ) : (
               orderedTasks.map((task) => {
@@ -782,7 +839,7 @@ export function TaskListPanel({
       ) : (
         <div className="p-4">
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Select a list or Today to view tasks
+            Select a list, Today, or Calendar to view tasks
           </p>
         </div>
       )}

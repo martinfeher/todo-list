@@ -10,6 +10,7 @@ export type LineBlockType =
   | "text"
   | "h1"
   | "h2"
+  | "h3"
   | "bullet"
   | "numbered"
   | "checklist"
@@ -49,6 +50,13 @@ export function getLineElements(editor: HTMLElement) {
   ) as HTMLElement[];
 }
 
+export function getLineById(editor: HTMLElement, lineId: string) {
+  return (
+    getLineElements(editor).find((line) => line.dataset.lineId === lineId) ??
+    null
+  );
+}
+
 export function ensureBlockLines(editor: HTMLElement) {
   const existingLines = getLineElements(editor);
 
@@ -67,6 +75,45 @@ export function ensureBlockLines(editor: HTMLElement) {
   parts.forEach((part) => {
     editor.appendChild(createLineElement(part));
   });
+}
+
+export function splitBlockLinesOnBreaks(editor: HTMLElement) {
+  ensureBlockLines(editor);
+
+  const lines = getLineElements(editor);
+  let changed = false;
+
+  for (const line of [...lines]) {
+    if (line.querySelector(".detail-image-wrapper") || isCodeLine(line)) {
+      continue;
+    }
+
+    const parts = htmlToLineParts(line.innerHTML);
+    if (parts.length <= 1) continue;
+
+    const lineType = (line.dataset.lineType as LineBlockType | undefined) ?? "text";
+    line.innerHTML = parts[0];
+
+    let previousLine = line;
+    for (let index = 1; index < parts.length; index += 1) {
+      const newLine = createLineElement(parts[index], "text");
+
+      if (lineType !== "text" && lineType !== "h1") {
+        applyBlockTypeToLine(newLine, lineType, getLineElements(editor));
+      }
+
+      previousLine.after(newLine);
+      previousLine = newLine;
+    }
+
+    changed = true;
+  }
+
+  if (changed) {
+    syncLineEmptyState(editor);
+  }
+
+  return changed;
 }
 
 export function getActiveLineElement(editor: HTMLElement) {
@@ -326,6 +373,38 @@ export function applyBlockTypeToSelection(
 
 export function insertLineBelowLine(editor: HTMLElement, line: HTMLElement) {
   insertTypedLineBelowLine(editor, line, "text");
+}
+
+export function handleClickBelowLastLine(
+  editor: HTMLElement,
+  clientY: number,
+): "inserted" | "focused" | null {
+  ensureBlockLines(editor);
+
+  const lines = getLineElements(editor);
+  const lastLine = lines[lines.length - 1];
+  if (!lastLine) return null;
+
+  const lastRect = lastLine.getBoundingClientRect();
+  const editorRect = editor.getBoundingClientRect();
+
+  if (clientY <= lastRect.bottom || clientY > editorRect.bottom) {
+    return null;
+  }
+
+  editor.focus();
+
+  const lastLineHasContent =
+    !isDetailLineEmpty(lastLine) ||
+    lastLine.querySelector(".detail-image-wrapper") !== null;
+
+  if (lastLineHasContent) {
+    insertLineBelowLine(editor, lastLine);
+    return "inserted";
+  }
+
+  placeCaretInLine(lastLine);
+  return "focused";
 }
 
 function getNextListNumber(editor: HTMLElement, afterLine: HTMLElement) {

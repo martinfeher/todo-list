@@ -2,6 +2,15 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BiLink, BiRedo, BiUndo } from "react-icons/bi";
+import {
+  LuChevronDown,
+  LuCode,
+  LuHeading1,
+  LuHeading2,
+  LuHeading3,
+  LuList,
+  LuPilcrow,
+} from "react-icons/lu";
 import { getTaskById, renameTask, updateTaskDetails, updateTaskDueDate, updateTaskDueTime } from "@/app/actions/todo";
 import {
   formatDueTimeLabel,
@@ -16,8 +25,10 @@ import {
   getActiveLineElement,
   getDropIndex,
   getLineElementAtPoint,
+  getLineById,
   getLineElements,
   getLineIndex,
+  handleClickBelowLastLine,
   insertImagesIntoEditor,
   insertTypedLineBelowLine,
   isCodeLine,
@@ -27,6 +38,7 @@ import {
   removeImageWrapper,
   reorderLine,
   splitEditorContent,
+  splitBlockLinesOnBreaks,
   splitLineAtCursor,
   syncLineEmptyState,
 } from "./detail-lines";
@@ -49,6 +61,7 @@ import {
   getLinkFromSelection,
   normalizeLinks,
 } from "./detail-links";
+import { normalizeEditorFonts } from "./detail-fonts";
 import { TaskDatePicker } from "./task-date-picker";
 import {
   BulletListIcon,
@@ -92,7 +105,8 @@ type FormatMenuState = {
   y: number;
 };
 
-type LineControlsState = {
+type LineControlItem = {
+  lineId: string;
   top: number;
 };
 
@@ -115,13 +129,33 @@ const FORMAT_LIST_OPTIONS: {
   { type: "checklist", label: "Check list", Icon: ChecklistIcon },
 ];
 
-const ADD_BLOCK_OPTIONS: { type: LineBlockType; label: string }[] = [
-  { type: "text", label: "Text" },
-  { type: "h1", label: "Heading 1" },
-  { type: "h2", label: "Heading 2" },
-  { type: "bullet", label: "Bullet list" },
-  { type: "numbered", label: "Numbered list" },
-  { type: "code", label: "Code" },
+type TextBlockType = "text" | "h1" | "h2" | "h3";
+
+type TextTypeMenuState = {
+  top: number;
+  left: number;
+};
+
+const TEXT_BLOCK_OPTIONS: {
+  type: TextBlockType;
+  label: string;
+  Icon: typeof LuPilcrow;
+}[] = [
+  { type: "text", label: "Text", Icon: LuPilcrow },
+  { type: "h1", label: "Heading 1", Icon: LuHeading1 },
+  { type: "h2", label: "Heading 2", Icon: LuHeading2 },
+  { type: "h3", label: "Heading 3", Icon: LuHeading3 },
+];
+
+const ADD_BLOCK_OPTIONS: {
+  type: LineBlockType;
+  label: string;
+  Icon: typeof LuPilcrow;
+}[] = [
+  ...TEXT_BLOCK_OPTIONS,
+  { type: "bullet", label: "Bullet list", Icon: BulletListIcon },
+  { type: "numbered", label: "Numbered list", Icon: NumberedListIcon },
+  { type: "code", label: "Code", Icon: LuCode },
 ];
 
 const AUTO_SAVE_DELAY_MS = 4000;
@@ -286,14 +320,16 @@ export function TaskDetailsPanel({
   const [task, setTask] = useState<TaskDetails | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [formatMenu, setFormatMenu] = useState<FormatMenuState | null>(null);
-  const [lineControls, setLineControls] = useState<LineControlsState | null>(null);
+  const [lineControls, setLineControls] = useState<LineControlItem[]>([]);
   const [dropIndicator, setDropIndicator] = useState<DropIndicatorState | null>(null);
   const [isImageDropActive, setIsImageDropActive] = useState(false);
   const [addBlockMenu, setAddBlockMenu] = useState<AddBlockMenuState | null>(null);
+  const [textTypeMenu, setTextTypeMenu] = useState<TextTypeMenuState | null>(null);
   const [isDateMenuOpen, setIsDateMenuOpen] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
+  const [showFormatTextTypeMenu, setShowFormatTextTypeMenu] = useState(false);
   const [showLinkMenu, setShowLinkMenu] = useState(false);
   const [linkText, setLinkText] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
@@ -310,6 +346,7 @@ export function TaskDetailsPanel({
   const savedLinkSelectionRef = useRef<Range | null>(null);
   const showLinkMenuRef = useRef(false);
   const addBlockMenuRef = useRef<HTMLDivElement>(null);
+  const textTypeMenuRef = useRef<HTMLDivElement>(null);
   const dateMenuRef = useRef<HTMLDivElement>(null);
   const dateButtonRef = useRef<HTMLButtonElement>(null);
   const lineControlsRef = useRef<HTMLDivElement>(null);
@@ -458,7 +495,7 @@ export function TaskDetailsPanel({
     const editor = editorRef.current;
     const wrapper = editorWrapperRef.current;
     if (!editor || !wrapper) {
-      setLineControls(null);
+      setLineControls([]);
       return;
     }
 
@@ -466,38 +503,47 @@ export function TaskDetailsPanel({
 
     let line: HTMLElement | null = null;
 
-    if (isMouseOverEditorRef.current && hoveredLineRef.current) {
+    if (addBlockMenu && activeLineControlsRef.current) {
+      line = activeLineControlsRef.current;
+    } else if (isMouseOverEditorRef.current && hoveredLineRef.current) {
       line = hoveredLineRef.current;
     } else if (editor.contains(document.activeElement)) {
       line = getActiveLineElement(editor);
+    } else {
+      setLineControls([]);
+      return;
     }
 
     if (!line || !editor.contains(line)) {
-      activeLineControlsRef.current = null;
-      setLineControls(null);
+      setLineControls([]);
       return;
     }
 
     if (getLineIndex(editor, line) === 0) {
-      activeLineControlsRef.current = null;
-      setLineControls(null);
+      setLineControls([]);
+      return;
+    }
+
+    const lineId = line.dataset.lineId;
+    if (!lineId) {
+      setLineControls([]);
       return;
     }
 
     const position = getLineControlsPositionForLine(line, wrapper);
     if (!position) {
-      activeLineControlsRef.current = null;
-      setLineControls(null);
+      setLineControls([]);
       return;
     }
 
     activeLineControlsRef.current = line;
-    setLineControls(position);
-  }, []);
+    setLineControls([{ lineId, top: position.top }]);
+  }, [addBlockMenu]);
 
   const closeFormatMenu = useCallback(() => {
     setFormatMenu(null);
     setShowColorMenu(false);
+    setShowFormatTextTypeMenu(false);
     setShowLinkMenu(false);
     showLinkMenuRef.current = false;
     savedLinkSelectionRef.current = null;
@@ -551,6 +597,7 @@ export function TaskDetailsPanel({
       y: rect.top - 8,
     });
     setShowColorMenu(false);
+    setShowFormatTextTypeMenu(false);
   }, [closeFormatMenu]);
 
   const applyFormat = useCallback(
@@ -597,6 +644,7 @@ export function TaskDetailsPanel({
     showLinkMenuRef.current = true;
     setShowLinkMenu(true);
     setShowColorMenu(false);
+    setShowFormatTextTypeMenu(false);
 
     requestAnimationFrame(() => {
       linkUrlInputRef.current?.focus();
@@ -676,6 +724,31 @@ export function TaskDetailsPanel({
     ],
   );
 
+  const applyFormatTextType = useCallback(
+    (type: TextBlockType) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      const activeLine = getActiveLineElement(editor);
+      if (isCodeLine(activeLine)) return;
+
+      editor.focus();
+      applyBlockTypeToSelection(editor, type);
+      syncEditorContent();
+      recordHistorySnapshot();
+      scheduleAutoSave();
+      closeFormatMenu();
+      updateLineControls();
+    },
+    [
+      closeFormatMenu,
+      recordHistorySnapshot,
+      scheduleAutoSave,
+      syncEditorContent,
+      updateLineControls,
+    ],
+  );
+
   const restoreHistorySnapshot = useCallback(
     (index: number) => {
       const editor = editorRef.current;
@@ -686,6 +759,7 @@ export function TaskDetailsPanel({
       isApplyingHistoryRef.current = true;
       editor.innerHTML = html;
       ensureBlockLines(editor);
+      normalizeEditorFonts(editor);
       historyIndexRef.current = index;
       previousTextRef.current = editor.textContent ?? "";
       syncEditorContent();
@@ -693,6 +767,7 @@ export function TaskDetailsPanel({
       updateLineControls();
       closeFormatMenu();
       setAddBlockMenu(null);
+      setTextTypeMenu(null);
       scheduleAutoSave();
 
       requestAnimationFrame(() => {
@@ -728,6 +803,7 @@ export function TaskDetailsPanel({
     editor.innerHTML = detailsRef.current;
     ensureBlockLines(editor);
     ensureTitleLine(editor);
+    normalizeEditorFonts(editor);
     syncLineEmptyState(editor);
     previousTextRef.current = editor.textContent ?? "";
     hydratedTaskIdRef.current = task.id;
@@ -755,8 +831,9 @@ export function TaskDetailsPanel({
       taskIdRef.current = null;
       setSaveStatus("idle");
       closeFormatMenu();
-      setLineControls(null);
+      setLineControls([]);
       setAddBlockMenu(null);
+      setTextTypeMenu(null);
       setIsDateMenuOpen(false);
       setCanUndo(false);
       setCanRedo(false);
@@ -770,8 +847,9 @@ export function TaskDetailsPanel({
     hydratedTaskIdRef.current = null;
     setSaveStatus("loading");
     closeFormatMenu();
-    setLineControls(null);
+    setLineControls([]);
     setAddBlockMenu(null);
+    setTextTypeMenu(null);
     setIsDateMenuOpen(false);
 
     void getTaskById(taskId)
@@ -876,6 +954,10 @@ export function TaskDetailsPanel({
         return;
       }
 
+      if (textTypeMenuRef.current?.contains(target)) {
+        return;
+      }
+
       if (dateMenuRef.current?.contains(target)) {
         return;
       }
@@ -885,11 +967,11 @@ export function TaskDetailsPanel({
       }
 
       setAddBlockMenu(null);
+      setTextTypeMenu(null);
       setIsDateMenuOpen(false);
 
       if (!panelRef.current?.contains(target)) {
         closeFormatMenu();
-        setLineControls(null);
         void saveDetails();
       }
     }
@@ -947,8 +1029,10 @@ export function TaskDetailsPanel({
     const editor = editorRef.current;
     if (editor) {
       ensureBlockLines(editor);
+      splitBlockLinesOnBreaks(editor);
       ensureTitleLine(editor);
       normalizeLinks(editor);
+      normalizeEditorFonts(editor);
       syncLineEmptyState(editor);
     }
 
@@ -1005,6 +1089,7 @@ export function TaskDetailsPanel({
 
       editor.focus();
       document.execCommand("insertText", false, text);
+      normalizeEditorFonts(editor);
       syncEditorContent();
       recordHistorySnapshot();
       scheduleAutoSave();
@@ -1013,11 +1098,27 @@ export function TaskDetailsPanel({
     }
 
     const files = getImageFilesFromDataTransfer(event.clipboardData);
-    if (files.length === 0) return;
+    if (files.length > 0) {
+      event.preventDefault();
+      void insertImagesFromFiles(files, activeLine);
+      return;
+    }
 
-    event.preventDefault();
+    requestAnimationFrame(() => {
+      const currentEditor = editorRef.current;
+      if (!currentEditor) return;
 
-    void insertImagesFromFiles(files, activeLine);
+      normalizeEditorFonts(currentEditor);
+      ensureBlockLines(currentEditor);
+      splitBlockLinesOnBreaks(currentEditor);
+      ensureTitleLine(currentEditor);
+      normalizeLinks(currentEditor);
+      syncLineEmptyState(currentEditor);
+      syncEditorContent();
+      recordHistorySnapshot();
+      scheduleAutoSave();
+      updateLineControls();
+    });
   }
 
   function handleEditorDragEnter(event: React.DragEvent<HTMLDivElement>) {
@@ -1072,11 +1173,6 @@ export function TaskDetailsPanel({
       return;
     }
 
-    if (!isMouseOverEditorRef.current) {
-      setLineControls(null);
-      activeLineControlsRef.current = null;
-    }
-
     flushHistorySnapshot();
     void saveDetails();
   }
@@ -1090,8 +1186,6 @@ export function TaskDetailsPanel({
     ensureBlockLines(editor);
 
     const line = getLineElementAtPoint(editor, event.clientY);
-    if (!line) return;
-
     hoveredLineRef.current = line;
     updateLineControls();
   }
@@ -1106,20 +1200,15 @@ export function TaskDetailsPanel({
     const relatedTarget = event.relatedTarget as Node | null;
     if (
       lineControlsRef.current?.contains(relatedTarget) ||
-      addBlockMenuRef.current?.contains(relatedTarget)
+      addBlockMenuRef.current?.contains(relatedTarget) ||
+      textTypeMenuRef.current?.contains(relatedTarget)
     ) {
       return;
     }
 
     isMouseOverEditorRef.current = false;
     hoveredLineRef.current = null;
-
-    if (!editorRef.current?.contains(document.activeElement)) {
-      activeLineControlsRef.current = null;
-      setLineControls(null);
-    } else {
-      updateLineControls();
-    }
+    updateLineControls();
   }
 
   function handleEditorFocus() {
@@ -1137,6 +1226,17 @@ export function TaskDetailsPanel({
     const editor = editorRef.current;
     if (!editor) return;
 
+    const clickResult = handleClickBelowLastLine(editor, event.clientY);
+    if (clickResult) {
+      if (clickResult === "inserted") {
+        syncEditorContent();
+        recordHistorySnapshot();
+        scheduleAutoSave();
+      }
+      updateLineControls();
+      return;
+    }
+
     const line = getLineElementAtPoint(editor, event.clientY);
     if (!line || !isDetailLineEmpty(line)) return;
 
@@ -1145,8 +1245,20 @@ export function TaskDetailsPanel({
     });
   }
 
-  function handlePlusClick(event: React.MouseEvent<HTMLButtonElement>) {
+  function handlePlusClick(
+    event: React.MouseEvent<HTMLButtonElement>,
+    lineId: string,
+  ) {
     event.stopPropagation();
+    setTextTypeMenu(null);
+
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const line = getLineById(editor, lineId);
+    if (!line) return;
+
+    activeLineControlsRef.current = line;
 
     const rect = event.currentTarget.getBoundingClientRect();
     setAddBlockMenu((current) =>
@@ -1157,6 +1269,48 @@ export function TaskDetailsPanel({
             left: rect.left,
           },
     );
+  }
+
+  function handleTextTypeClick(event: React.MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    setAddBlockMenu(null);
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    setTextTypeMenu((current) =>
+      current
+        ? null
+        : {
+            top: rect.bottom + 4,
+            left: rect.left,
+          },
+    );
+  }
+
+  function handleApplyTextType(type: TextBlockType) {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const line =
+      activeLineControlsRef.current ?? getActiveLineElement(editor);
+    if (!line) return;
+
+    editor.focus();
+
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(line);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    applyBlockTypeToSelection(editor, type);
+    setTextTypeMenu(null);
+    syncEditorContent();
+    recordHistorySnapshot();
+    scheduleAutoSave();
+    updateLineControls();
   }
 
   function handleInsertBlockType(type: LineBlockType) {
@@ -1262,16 +1416,19 @@ export function TaskDetailsPanel({
     document.addEventListener("pointerup", handleDragEnd);
   }
 
-  function handleLineDragStart(event: React.PointerEvent<HTMLButtonElement>) {
+  function handleLineDragStart(
+    event: React.PointerEvent<HTMLButtonElement>,
+    lineId: string,
+  ) {
     event.preventDefault();
 
     const editor = editorRef.current;
     if (!editor) return;
 
-    const line =
-      activeLineControlsRef.current ?? getActiveLineElement(editor);
+    const line = getLineById(editor, lineId);
     if (!line) return;
 
+    activeLineControlsRef.current = line;
     beginLineReorderDrag(line);
   }
 
@@ -1574,7 +1731,7 @@ export function TaskDetailsPanel({
               onKeyDown={handleEditorKeyDown}
               onKeyUp={handleEditorKeyUp}
               onScroll={updateLineControls}
-              className="task-details-editor min-h-[650px] reounded-xl w-full resize-y overflow-auto bg-white py-2 pl-10 pr-3 text-[1.05rem] leading-[1.5rem] text-[#333333] outline-none dark:bg-white dark:text-[#333333] [&_.detail-line[data-line-type=bullet]]:pl-1 [&_.detail-line[data-line-type=checklist]]:pl-1 [&_.detail-line[data-line-type=h1]]:text-[1.875rem] [&_.detail-line[data-line-type=h1]]:font-bold [&_.detail-line[data-line-type=h1]]:leading-[2.25rem] [&_.detail-line[data-line-type=h2]]:text-[1.3125rem] [&_.detail-line[data-line-type=h2]]:font-semibold [&_.detail-line[data-line-type=h2]]:leading-[1.6875rem] [&_.detail-line[data-line-type=numbered]]:pl-1 [&_mark]:bg-yellow-200 [&_s]:line-through [&_strike]:line-through [&_u]:underline"
+              className="task-details-editor min-h-[650px] reounded-xl w-full resize-y overflow-auto bg-white py-2 pl-10 pr-3 text-[17px] leading-[1.6] text-[#333333] outline-none dark:bg-white dark:text-[#333333] [&_.detail-line[data-line-type=bullet]]:pl-1 [&_.detail-line[data-line-type=checklist]]:pl-1 [&_.detail-line[data-line-type=h1]]:text-[24px] [&_.detail-line[data-line-type=h1]]:font-bold [&_.detail-line[data-line-type=h1]]:leading-[32px] [&_.detail-line[data-line-type=h2]]:text-[1.3125rem] [&_.detail-line[data-line-type=h2]]:font-semibold [&_.detail-line[data-line-type=h2]]:leading-[1.6875rem] [&_.detail-line[data-line-type=h3]]:text-[1.125rem] [&_.detail-line[data-line-type=h3]]:font-semibold [&_.detail-line[data-line-type=h3]]:leading-[1.5rem] [&_.detail-line[data-line-type=numbered]]:pl-1 [&_mark]:bg-yellow-200 [&_s]:line-through [&_strike]:line-through [&_u]:underline"
             />
 
             {dropIndicator && (
@@ -1584,33 +1741,42 @@ export function TaskDetailsPanel({
               />
             )}
 
-            {lineControls && (
+            {lineControls.length > 0 && (
               <div
                 ref={lineControlsRef}
-                className="pointer-events-auto absolute left-1 z-10 flex h-[1.5rem] -translate-y-1/2 items-center gap-0.5"
-                style={{ top: lineControls.top }}
+                className="pointer-events-none absolute inset-0 z-10"
               >
-                <button
-                  type="button"
-                  aria-label="Add block below"
-                  title="Add block below"
-                  aria-haspopup="menu"
-                  aria-expanded={addBlockMenu !== null}
-                  className="flex size-3 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={handlePlusClick}
-                >
-                  <PlusIcon className="size-3" />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Drag line"
-                  title="Drag to reorder line"
-                  className="flex size-3 cursor-grab items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 active:cursor-grabbing dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                  onPointerDown={handleLineDragStart}
-                >
-                  <InteractIcon className="size-2.5" />
-                </button>
+                {lineControls.map(({ lineId, top }) => (
+                  <div
+                    key={lineId}
+                    className="pointer-events-auto absolute left-1 flex h-[1.6em] -translate-y-1/2 items-center gap-0.5"
+                    style={{ top }}
+                  >
+                    <button
+                      type="button"
+                      aria-label="Add block below"
+                      title="Add block below"
+                      aria-haspopup="menu"
+                      aria-expanded={addBlockMenu !== null}
+                      className="flex size-3 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={(event) => handlePlusClick(event, lineId)}
+                    >
+                      <PlusIcon className="size-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Drag line"
+                      title="Drag to reorder line"
+                      className="flex size-3 cursor-grab items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 active:cursor-grabbing dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                      onPointerDown={(event) =>
+                        handleLineDragStart(event, lineId)
+                      }
+                    >
+                      <InteractIcon className="size-2.5" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -1628,15 +1794,46 @@ export function TaskDetailsPanel({
           className="fixed z-50 min-w-[168px] rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
           style={{ top: addBlockMenu.top, left: addBlockMenu.left }}
         >
-          {ADD_BLOCK_OPTIONS.map((option) => (
+          {ADD_BLOCK_OPTIONS.map((option, index) => (
+            <div key={option.type}>
+              {index === TEXT_BLOCK_OPTIONS.length && (
+                <div
+                  role="separator"
+                  className="my-1 border-t border-zinc-200 dark:border-zinc-700"
+                />
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => handleInsertBlockType(option.type)}
+              >
+                <option.Icon className="size-4 shrink-0 text-zinc-500 dark:text-zinc-400" />
+                {option.label}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {textTypeMenu && (
+        <div
+          ref={textTypeMenuRef}
+          role="menu"
+          className="fixed z-50 min-w-[168px] rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+          style={{ top: textTypeMenu.top, left: textTypeMenu.left }}
+        >
+          {TEXT_BLOCK_OPTIONS.map((option) => (
             <button
               key={option.type}
               type="button"
               role="menuitem"
-              className="block w-full px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => handleInsertBlockType(option.type)}
+              onClick={() => handleApplyTextType(option.type)}
             >
+              <option.Icon className="size-4 shrink-0 text-zinc-500 dark:text-zinc-400" />
               {option.label}
             </button>
           ))}
@@ -1674,14 +1871,60 @@ export function TaskDetailsPanel({
           ) : (
             <>
               <div className="flex gap-1 p-1">
-                <button
-                  type="button"
-                  className="h-[30px] rounded px-3 text-sm font-bold text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => applyFormat("bold")}
-                >
-                  B
-                </button>
+                <div className="relative flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    className="h-[30px] rounded px-3 text-sm font-bold text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setShowFormatTextTypeMenu(false);
+                      applyFormat("bold");
+                    }}
+                  >
+                    B
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Text and headings"
+                    title="Text and headings"
+                    aria-haspopup="menu"
+                    aria-expanded={showFormatTextTypeMenu}
+                    className={`flex h-[30px] items-center gap-0.5 rounded border px-1.5 text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800 ${
+                      showFormatTextTypeMenu
+                        ? "border-zinc-300 bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800"
+                        : "border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+                    }`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setShowColorMenu(false);
+                      setShowFormatTextTypeMenu((open) => !open);
+                    }}
+                  >
+                    <LuList className="size-3.5" />
+                    <LuChevronDown className="size-3" />
+                  </button>
+
+                  {showFormatTextTypeMenu && (
+                    <div
+                      role="menu"
+                      className="absolute top-full left-0 z-10 mt-1 min-w-[168px] rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                    >
+                      {TEXT_BLOCK_OPTIONS.map((option) => (
+                        <button
+                          key={option.type}
+                          type="button"
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => applyFormatTextType(option.type)}
+                        >
+                          <option.Icon className="size-4 shrink-0 text-zinc-500 dark:text-zinc-400" />
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   className="h-[30px] rounded px-3 text-sm italic text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
@@ -1700,6 +1943,8 @@ export function TaskDetailsPanel({
                 </button>
                 <button
                   type="button"
+                  aria-label="Highlight"
+                  title="Highlight"
                   className="h-[30px] rounded px-3 text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => applyFormat("highlight")}
@@ -1747,7 +1992,10 @@ export function TaskDetailsPanel({
                     showColorMenu ? "bg-zinc-100 dark:bg-zinc-800" : ""
                   }`}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => setShowColorMenu((open) => !open)}
+                  onClick={() => {
+                    setShowFormatTextTypeMenu(false);
+                    setShowColorMenu((open) => !open);
+                  }}
                 >
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
                     A

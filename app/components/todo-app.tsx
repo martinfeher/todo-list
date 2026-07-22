@@ -15,6 +15,7 @@ import {
 } from "@/app/actions/todo";
 import type { TaskDueTime } from "@/lib/task-due-time";
 import { Sidebar } from "./sidebar";
+import { CalendarPanel } from "./calendar-panel";
 import { TaskDetailsPanel } from "./task-details-panel";
 import { TaskListPanel } from "./task-list-panel";
 import { mergeReorderedActiveTasks } from "./task-reorder";
@@ -83,6 +84,54 @@ function isDueToday(dueDate: string | null) {
   return isSameDay(startOfDay(date), startOfDay(new Date()));
 }
 
+function getVisibleTasks(
+  activeView: "today" | "calendar" | null,
+  listId: string | null,
+  lists: TodoList[],
+  tasksByList: Record<string, Task[]>,
+): TaskListItem[] {
+  if (activeView === "today") {
+    return lists.flatMap((list) =>
+      (tasksByList[list.id] ?? [])
+        .filter((task) => !task.completed && isDueToday(task.dueDate))
+        .map((task) => ({
+          ...task,
+          listName: list.name,
+        })),
+    );
+  }
+
+  if (activeView === "calendar") {
+    return lists
+      .flatMap((list) =>
+        (tasksByList[list.id] ?? [])
+          .filter((task) => !task.completed && task.dueDate)
+          .map((task) => ({
+            ...task,
+            listName: list.name,
+          })),
+      )
+      .sort((a, b) => {
+        const aTime = new Date(a.dueDate!).getTime();
+        const bTime = new Date(b.dueDate!).getTime();
+        return aTime - bTime;
+      });
+  }
+
+  if (!listId) return [];
+
+  return (tasksByList[listId] ?? []).filter((task) => !task.completed);
+}
+
+function getFirstVisibleTaskId(
+  activeView: "today" | "calendar" | null,
+  listId: string | null,
+  lists: TodoList[],
+  tasksByList: Record<string, Task[]>,
+) {
+  return getVisibleTasks(activeView, listId, lists, tasksByList)[0]?.id ?? null;
+}
+
 export type TaskListItem = Task & {
   listName?: string;
 };
@@ -91,7 +140,7 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
   const [lists, setLists] = useState(initialLists);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<"today" | null>(null);
+  const [activeView, setActiveView] = useState<"today" | "calendar" | null>(null);
   const [tasksByList, setTasksByList] = useState(initialTasksByList);
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
   const undoTimerRef = useRef<number | null>(null);
@@ -100,19 +149,27 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
   const allTasksInList = selectedListId ? (tasksByList[selectedListId] ?? []) : [];
   const activeTasks = allTasksInList.filter((task) => !task.completed);
 
-  const todayTasks: TaskListItem[] = lists.flatMap((list) =>
-    (tasksByList[list.id] ?? [])
-      .filter((task) => !task.completed && isDueToday(task.dueDate))
-      .map((task) => ({
-        ...task,
-        listName: list.name,
-      })),
+  const todayTasks: TaskListItem[] = getVisibleTasks("today", null, lists, tasksByList);
+
+  const calendarTasks: TaskListItem[] = getVisibleTasks(
+    "calendar",
+    null,
+    lists,
+    tasksByList,
   );
 
   const taskListTitle =
-    activeView === "today" ? "Today" : (selectedList?.name ?? null);
+    activeView === "today"
+      ? "Today"
+      : activeView === "calendar"
+        ? "Calendar"
+        : (selectedList?.name ?? null);
   const taskListItems: TaskListItem[] =
-    activeView === "today" ? todayTasks : activeTasks;
+    activeView === "today"
+      ? todayTasks
+      : activeView === "calendar"
+        ? calendarTasks
+        : activeTasks;
 
   const completedTasks: CompletedTask[] = useMemo(
     () =>
@@ -174,11 +231,19 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
   function selectList(listId: string) {
     setActiveView(null);
     setSelectedListId(listId);
-    setSelectedTaskId(null);
+    setSelectedTaskId(
+      getFirstVisibleTaskId(null, listId, lists, tasksByList),
+    );
   }
 
   function selectToday() {
     setActiveView("today");
+    setSelectedListId(null);
+    setSelectedTaskId(getFirstVisibleTaskId("today", null, lists, tasksByList));
+  }
+
+  function selectCalendar() {
+    setActiveView("calendar");
     setSelectedListId(null);
     setSelectedTaskId(null);
   }
@@ -197,6 +262,7 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
     setTasksByList((current) => ({ ...current, [list.id]: [] }));
     setActiveView(null);
     setSelectedListId(list.id);
+    setSelectedTaskId(null);
   }
 
   async function renameList(listId: string, name: string) {
@@ -477,9 +543,11 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
           searchTasks={searchTasks}
           selectedListId={selectedListId}
           isTodaySelected={activeView === "today"}
+          isCalendarSelected={activeView === "calendar"}
           selectedTaskId={selectedTaskId}
           onSelectList={selectList}
           onSelectToday={selectToday}
+          onSelectCalendar={selectCalendar}
           onSelectCompletedTask={selectCompletedTask}
           onSelectSearchTask={selectCompletedTask}
           onToggleTask={toggleTask}
@@ -487,29 +555,44 @@ export function TodoApp({ initialLists, initialTasksByList }: TodoAppProps) {
           onRenameList={renameList}
           onRemoveList={removeList}
         />
-        <TaskListPanel
-          title={taskListTitle}
-          tasks={taskListItems}
-          selectedTaskId={selectedTaskId}
-          expanded={!showDetailsPanel}
-          showAddTask={selectedListId !== null}
-          listId={selectedListId}
-          onAddTask={addTask}
-          onToggleTask={toggleTask}
-          onSelectTask={setSelectedTaskId}
-          onRenameTask={renameTask}
-          onReorderTasks={reorderTasks}
-          onSetTaskDueDate={setTaskDueDate}
-          onSetTaskDueTime={setTaskDueTime}
-          onSetTaskPriority={setTaskPriority}
-        />
-        {showDetailsPanel && (
-          <TaskDetailsPanel
-            taskId={selectedTaskId}
-            onDetailsSaved={handleDetailsSaved}
-            onTaskRenamed={handleTaskRenamed}
-            onDueDateUpdated={handleDueDateUpdated}
+        {activeView === "calendar" ? (
+          <CalendarPanel
+            tasks={calendarTasks}
+            selectedTaskId={selectedTaskId}
+            onToggleTask={toggleTask}
+            onSelectTask={setSelectedTaskId}
+            onRenameTask={renameTask}
+            onSetTaskDueDate={setTaskDueDate}
+            onSetTaskDueTime={setTaskDueTime}
+            onSetTaskPriority={setTaskPriority}
           />
+        ) : (
+          <>
+            <TaskListPanel
+              title={taskListTitle}
+              tasks={taskListItems}
+              selectedTaskId={selectedTaskId}
+              expanded={!showDetailsPanel}
+              showAddTask={selectedListId !== null}
+              listId={selectedListId}
+              onAddTask={addTask}
+              onToggleTask={toggleTask}
+              onSelectTask={setSelectedTaskId}
+              onRenameTask={renameTask}
+              onReorderTasks={reorderTasks}
+              onSetTaskDueDate={setTaskDueDate}
+              onSetTaskDueTime={setTaskDueTime}
+              onSetTaskPriority={setTaskPriority}
+            />
+            {showDetailsPanel && (
+              <TaskDetailsPanel
+                taskId={selectedTaskId}
+                onDetailsSaved={handleDetailsSaved}
+                onTaskRenamed={handleTaskRenamed}
+                onDueDateUpdated={handleDueDateUpdated}
+              />
+            )}
+          </>
         )}
       </div>
       <UndoButton
