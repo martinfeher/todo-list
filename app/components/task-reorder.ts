@@ -6,6 +6,44 @@ export function getTaskRowElements(container: HTMLElement) {
   );
 }
 
+export function mergeReorderedPinnedTasks<
+  T extends { id: string; completed: boolean; pinned: boolean },
+>(allTasks: T[], reorderedPinnedActiveIds: string[]) {
+  const taskMap = new Map(allTasks.map((task) => [task.id, task]));
+  const reorderedPinned = reorderedPinnedActiveIds
+    .map((id) => taskMap.get(id))
+    .filter((task): task is T => task !== undefined);
+
+  let pinnedActiveIndex = 0;
+
+  return allTasks.map((task) => {
+    if (task.completed || !task.pinned) return task;
+
+    const next = reorderedPinned[pinnedActiveIndex];
+    pinnedActiveIndex += 1;
+    return next ?? task;
+  });
+}
+
+export function mergeReorderedUnpinnedTasks<
+  T extends { id: string; completed: boolean; pinned: boolean },
+>(allTasks: T[], reorderedUnpinnedActiveIds: string[]) {
+  const taskMap = new Map(allTasks.map((task) => [task.id, task]));
+  const reorderedUnpinned = reorderedUnpinnedActiveIds
+    .map((id) => taskMap.get(id))
+    .filter((task): task is T => task !== undefined);
+
+  let unpinnedActiveIndex = 0;
+
+  return allTasks.map((task) => {
+    if (task.completed || task.pinned) return task;
+
+    const next = reorderedUnpinned[unpinnedActiveIndex];
+    unpinnedActiveIndex += 1;
+    return next ?? task;
+  });
+}
+
 export function mergeReorderedActiveTasks<T extends { id: string; completed: boolean }>(
   allTasks: T[],
   reorderedActiveIds: string[],

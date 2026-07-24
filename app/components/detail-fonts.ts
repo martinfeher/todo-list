@@ -11,11 +11,17 @@ function unwrapElement(element: HTMLElement) {
   parent.removeChild(element);
 }
 
-function isInterOrDefaultFont(fontFamily: string) {
+function isDefaultAppFont(fontFamily: string) {
   if (!fontFamily.trim()) return true;
 
   const lower = fontFamily.toLowerCase();
-  if (lower.includes("inter") || lower.includes("var(--font-inter)")) {
+  if (
+    lower.includes("sf pro") ||
+    lower.includes("sf-pro") ||
+    lower.includes("var(--font-sf-pro)") ||
+    lower.includes("inter") ||
+    lower.includes("var(--font-inter)")
+  ) {
     return true;
   }
 
@@ -36,7 +42,11 @@ function isInterOrDefaultFont(fontFamily: string) {
   ]);
 
   return parts.every(
-    (part) => genericFamilies.has(part) || part.includes("inter"),
+    (part) =>
+      genericFamilies.has(part) ||
+      part.includes("sf pro") ||
+      part.includes("sf-pro") ||
+      part.includes("inter"),
   );
 }
 
@@ -96,7 +106,7 @@ export function normalizeEditorFonts(editor: HTMLElement) {
     if (shouldSkipFontNormalization(element)) continue;
 
     const fontFamily = element.style.fontFamily;
-    if (fontFamily && !isInterOrDefaultFont(fontFamily)) {
+    if (fontFamily && !isDefaultAppFont(fontFamily)) {
       element.style.removeProperty("font-family");
       changed = true;
       cleanupStyledElement(element);

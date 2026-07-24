@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import {
+  getLabelTagsFromTaskTags,
   getPriorityFromTaskTags,
+  LABEL_TAG_CATEGORY,
   PRIORITY_TAG_CATEGORY,
   PRIORITY_TAGS,
 } from "@/lib/task-tags";
@@ -79,17 +81,21 @@ export async function getTodoData() {
         orderBy: [{ position: "asc" }, { createdAt: "asc" }],
         include: {
           tags: {
-            where: { tag: { category: PRIORITY_TAG_CATEGORY } },
             include: { tag: true },
           },
         },
       },
     },
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
   });
 
   return {
     lists: lists.map(({ id, name }) => ({ id, name })),
+    labelTags: await prisma.tag.findMany({
+      where: { category: LABEL_TAG_CATEGORY },
+      orderBy: { label: "asc" },
+      select: { id: true, label: true },
+    }),
     tasksByList: Object.fromEntries(
       lists.map((list) => [
         list.id,
@@ -104,6 +110,7 @@ export async function getTodoData() {
             dueDurationMinutes,
             dueTimeZone,
             tags,
+            pinned,
           }) => ({
           id,
           name,
@@ -114,6 +121,8 @@ export async function getTodoData() {
           dueDurationMinutes,
           dueTimeZone: normalizeDueTimeZone(dueTimeZone),
           priority: getPriorityFromTaskTags(tags),
+          tags: getLabelTagsFromTaskTags(tags),
+          pinned: Boolean(pinned),
         }),
         ),
       ]),

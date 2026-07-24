@@ -9,6 +9,8 @@ import {
   type TaskDueTime,
 } from "@/lib/task-due-time";
 import {
+  LABEL_TAG_CATEGORY,
+  labelTagSlug,
   normalizePriority,
   PRIORITY_TAG_CATEGORY,
   prioritySlug,
@@ -147,6 +149,202 @@ export async function updateTaskPriority(taskId: string, priority: number | null
   };
 }
 
+export async function getLabelTags() {
+  return prisma.tag.findMany({
+    where: { category: LABEL_TAG_CATEGORY },
+    orderBy: { label: "asc" },
+    select: {
+      id: true,
+      label: true,
+    },
+  });
+}
+
+export async function getTaskLabelTags(taskId: string) {
+  const entries = await prisma.taskTag.findMany({
+    where: {
+      taskId,
+      tag: { category: LABEL_TAG_CATEGORY },
+    },
+    include: {
+      tag: {
+        select: {
+          id: true,
+          label: true,
+        },
+      },
+    },
+    orderBy: {
+      tag: { label: "asc" },
+    },
+  });
+
+  return entries.map((entry) => entry.tag);
+}
+
+export async function createLabelTag(label: string) {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    throw new Error("Tag label is required");
+  }
+
+  const slug = labelTagSlug(trimmed);
+  const tag = await prisma.tag.upsert({
+    where: { slug },
+    create: {
+      slug,
+      label: trimmed,
+      category: LABEL_TAG_CATEGORY,
+    },
+    update: {
+      label: trimmed,
+    },
+    select: {
+      id: true,
+      label: true,
+    },
+  });
+
+  revalidatePath("/");
+  return tag;
+}
+
+export async function applyTaskLabelTags(
+  taskId: string,
+  tagIds: string[],
+  newTagLabel?: string | null,
+) {
+  const uniqueTagIds = new Set(tagIds);
+
+  if (newTagLabel?.trim()) {
+    const trimmed = newTagLabel.trim();
+    const slug = labelTagSlug(trimmed);
+    const tag = await prisma.tag.upsert({
+      where: { slug },
+      create: {
+        slug,
+        label: trimmed,
+        category: LABEL_TAG_CATEGORY,
+      },
+      update: {
+        label: trimmed,
+      },
+      select: { id: true },
+    });
+    uniqueTagIds.add(tag.id);
+  }
+
+  if (uniqueTagIds.size === 0) {
+    throw new Error("Select or type at least one tag");
+  }
+
+  await prisma.$transaction(
+    [...uniqueTagIds].map((tagId) =>
+      prisma.taskTag.upsert({
+        where: {
+          taskId_tagId: {
+            taskId,
+            tagId,
+          },
+        },
+        create: {
+          taskId,
+          tagId,
+        },
+        update: {},
+      }),
+    ),
+  );
+
+  revalidatePath("/");
+  return getTaskLabelTags(taskId);
+}
+
+export async function setTaskLabelTag(
+  taskId: string,
+  tagId: string,
+  assigned: boolean,
+) {
+  if (assigned) {
+    await prisma.taskTag.upsert({
+      where: {
+        taskId_tagId: {
+          taskId,
+          tagId,
+        },
+      },
+      create: {
+        taskId,
+        tagId,
+      },
+      update: {},
+    });
+  } else {
+    await prisma.taskTag.deleteMany({
+      where: {
+        taskId,
+        tagId,
+        tag: { category: LABEL_TAG_CATEGORY },
+      },
+    });
+  }
+
+  revalidatePath("/");
+  return getTaskLabelTags(taskId);
+}
+
+export async function addTaskTag(taskId: string, label: string) {
+  const trimmed = label.trim();
+  if (!trimmed) {
+    throw new Error("Tag label is required");
+  }
+
+  const slug = labelTagSlug(trimmed);
+
+  await prisma.$transaction(async (tx) => {
+    const tag = await tx.tag.upsert({
+      where: { slug },
+      create: {
+        slug,
+        label: trimmed,
+        category: LABEL_TAG_CATEGORY,
+      },
+      update: {
+        label: trimmed,
+      },
+      select: { id: true },
+    });
+
+    await tx.taskTag.upsert({
+      where: {
+        taskId_tagId: {
+          taskId,
+          tagId: tag.id,
+        },
+      },
+      create: {
+        taskId,
+        tagId: tag.id,
+      },
+      update: {},
+    });
+  });
+
+  revalidatePath("/");
+  return { id: taskId, label: trimmed };
+}
+
+export async function updateTaskPinned(taskId: string, pinned: boolean) {
+  const task = await prisma.task.update({
+    where: { id: taskId },
+    data: { pinned },
+    select: { id: true, pinned: true },
+  });
+
+  revalidatePath("/");
+  return task;
+}
+
 export async function renameTask(taskId: string, name: string) {
   const task = await prisma.task.update({
     where: { id: taskId },
@@ -183,41 +381,151 @@ export async function deleteTodoList(listId: string) {
 }
 
 export async function createTodoList(name: string) {
-  const list = await prisma.todoList.create({
-    data: { name },
+  const list = await prisma.$transaction(async (tx) => {
+    const aggregate = await tx.todoList.aggregate({
+      _max: { position: true },
+    });
+    const position = (aggregate._max.position ?? -1) + 1;
+
+    return tx.todoList.create({
+      data: {
+        name,
+        position,
+      },
+    });
   });
 
   revalidatePath("/");
   return list;
 }
 
-export async function createTask(listId: string, name: string) {
-  const lastTask = await prisma.task.findFirst({
-    where: { listId },
-    orderBy: { position: "desc" },
-    select: { position: true },
+export async function reorderTodoLists(listIds: string[]) {
+  const lists = await prisma.todoList.findMany({
+    select: { id: true },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
   });
 
-  const task = await prisma.task.create({
-    data: {
-      listId,
-      name,
-      position: (lastTask?.position ?? -1) + 1,
-    },
+  const validIds = new Set(lists.map((list) => list.id));
+  const seen = new Set<string>();
+  const orderedIds: string[] = [];
+
+  for (const id of listIds) {
+    if (!validIds.has(id) || seen.has(id)) continue;
+    orderedIds.push(id);
+    seen.add(id);
+  }
+
+  for (const list of lists) {
+    if (!seen.has(list.id)) {
+      orderedIds.push(list.id);
+      seen.add(list.id);
+    }
+  }
+
+  if (orderedIds.length !== lists.length) {
+    throw new Error("Invalid list order payload");
+  }
+
+  await prisma.$transaction(
+    orderedIds.map((id, position) =>
+      prisma.todoList.update({
+        where: { id },
+        data: { position },
+      }),
+    ),
+  );
+
+  revalidatePath("/");
+}
+
+export async function createTask(listId: string, name: string) {
+  const task = await prisma.$transaction(async (tx) => {
+    await tx.task.updateMany({
+      where: { listId },
+      data: { position: { increment: 1 } },
+    });
+
+    return tx.task.create({
+      data: {
+        listId,
+        name,
+        position: 0,
+      },
+    });
   });
 
   revalidatePath("/");
   return task;
 }
 
+export async function moveTaskToList(taskId: string, targetListId: string) {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { listId: true },
+  });
+
+  if (!task || task.listId === targetListId) {
+    return;
+  }
+
+  const sourceListId = task.listId;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.task.updateMany({
+      where: { listId: targetListId },
+      data: { position: { increment: 1 } },
+    });
+
+    await tx.task.update({
+      where: { id: taskId },
+      data: {
+        listId: targetListId,
+        position: 0,
+      },
+    });
+
+    const sourceTasks = await tx.task.findMany({
+      where: { listId: sourceListId },
+      select: { id: true },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    });
+
+    await Promise.all(
+      sourceTasks.map((sourceTask, position) =>
+        tx.task.update({
+          where: { id: sourceTask.id },
+          data: { position },
+        }),
+      ),
+    );
+  });
+
+  revalidatePath("/");
+}
+
 export async function reorderTasks(listId: string, taskIds: string[]) {
   const tasks = await prisma.task.findMany({
     where: { listId },
     select: { id: true },
+    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
   });
 
   const validIds = new Set(tasks.map((task) => task.id));
-  const orderedIds = taskIds.filter((id) => validIds.has(id));
+  const seen = new Set<string>();
+  const orderedIds: string[] = [];
+
+  for (const id of taskIds) {
+    if (!validIds.has(id) || seen.has(id)) continue;
+    orderedIds.push(id);
+    seen.add(id);
+  }
+
+  for (const task of tasks) {
+    if (!seen.has(task.id)) {
+      orderedIds.push(task.id);
+      seen.add(task.id);
+    }
+  }
 
   if (orderedIds.length !== tasks.length) {
     throw new Error("Invalid task order payload");

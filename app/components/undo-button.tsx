@@ -1,5 +1,7 @@
 "use client";
 
+import { LuUndo2 } from "react-icons/lu";
+
 type UndoButtonProps = {
   visible: boolean;
   taskName: string;
@@ -13,9 +15,11 @@ export function UndoButton({ visible, taskName, onUndo }: UndoButtonProps) {
     <button
       type="button"
       onClick={onUndo}
-      className="fixed bottom-6 right-6 z-50 rounded-md bg-slate-400 px-4 py-2 text-sm font-medium text-white shadow-lg transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+      aria-label={`Undo completing ${taskName}`}
+      className="fixed bottom-14 right-4 z-50 flex cursor-pointer items-center gap-3 rounded-xl bg-[#2d3139] px-6 py-3 text-sm font-medium text-white shadow-[0_4px_16px_rgba(0,0,0,0.28)] transition-opacity hover:opacity-95"
     >
-      Undo: {taskName}
+      Task completed
+      <LuUndo2 className="size-5 shrink-0 text-[#86efac]" aria-hidden />
     </button>
   );
 }

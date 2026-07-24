@@ -1,4 +1,15 @@
 export const PRIORITY_TAG_CATEGORY = "priority";
+export const LABEL_TAG_CATEGORY = "label";
+
+export function labelTagSlug(label: string) {
+  const normalized = label
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+
+  return normalized || `tag-${Date.now()}`;
+}
 
 export const PRIORITY_TAGS = [
   { slug: "priority-1", label: "Priority 1", level: 1 },
@@ -38,4 +49,23 @@ export function getPriorityFromTaskTags(tags: TaskTagRecord[]): number | null {
   }
 
   return priorityTag.tag.level;
+}
+
+type LabelTagRecord = {
+  tag: {
+    id: string;
+    label: string;
+    category: string;
+  };
+};
+
+export function getLabelTagsFromTaskTags(
+  tags: LabelTagRecord[],
+): { id: string; label: string }[] {
+  return tags
+    .filter((entry) => entry.tag.category === LABEL_TAG_CATEGORY)
+    .map((entry) => ({
+      id: entry.tag.id,
+      label: entry.tag.label,
+    }));
 }

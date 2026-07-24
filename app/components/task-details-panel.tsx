@@ -33,8 +33,10 @@ import {
   insertTypedLineBelowLine,
   isCodeLine,
   isDetailLineEmpty,
+  isTitleLine,
   type LineBlockType,
   placeCaretInLine,
+  focusNoteAtEnd,
   removeImageWrapper,
   reorderLine,
   splitEditorContent,
@@ -83,8 +85,18 @@ type TaskDetails = {
   dueTimeZone: string;
 };
 
+type TaskDetailsSnapshot = {
+  name: string;
+  dueDate: string | null;
+  dueTimeMinutes: number | null;
+  dueDurationMinutes: number | null;
+  dueTimeZone: string;
+};
+
 type TaskDetailsPanelProps = {
   taskId: string | null;
+  taskSnapshot?: TaskDetailsSnapshot | null;
+  focusNoteAtEndRequest?: number;
   onDetailsSaved: (taskId: string, details: string) => void;
   onTaskRenamed: (taskId: string, name: string) => void;
   onDueDateUpdated: (
@@ -313,6 +325,8 @@ function applyHighlight(editor: HTMLElement) {
 
 export function TaskDetailsPanel({
   taskId,
+  taskSnapshot = null,
+  focusNoteAtEndRequest = 0,
   onDetailsSaved,
   onTaskRenamed,
   onDueDateUpdated,
@@ -337,7 +351,9 @@ export function TaskDetailsPanel({
   const detailsRef = useRef("");
   const taskIdRef = useRef<string | null>(null);
   const taskNameRef = useRef("");
+  const syncedTitleRef = useRef("");
   const hydratedTaskIdRef = useRef<string | null>(null);
+  const handledFocusNoteAtEndRequestRef = useRef(0);
   const panelRef = useRef<HTMLElement>(null);
   const editorWrapperRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
@@ -376,6 +392,57 @@ export function TaskDetailsPanel({
     detailsRef.current = html;
     return html;
   }, [readEditorContent]);
+
+  const syncTitleToTaskList = useCallback(() => {
+    const currentTaskId = taskIdRef.current;
+    const editor = editorRef.current;
+    if (!currentTaskId || !editor || !isReadyRef.current) return;
+
+    const { title } = splitEditorContent(editor.innerHTML);
+    if (!title || title === syncedTitleRef.current) return;
+
+    syncedTitleRef.current = title;
+    setTask((current) =>
+      current ? { ...current, name: title } : current,
+    );
+    onTaskRenamed(currentTaskId, title);
+  }, [onTaskRenamed]);
+
+  const syncExternalTaskName = useCallback(
+    (name: string) => {
+      const editor = editorRef.current;
+      if (!editor || !isReadyRef.current) return;
+
+      const { title } = splitEditorContent(editor.innerHTML);
+      if (title === name) {
+        syncedTitleRef.current = name;
+        return;
+      }
+
+      const activeLine =
+        document.activeElement === editor ? getActiveLineElement(editor) : null;
+      const titleLine = getLineElements(editor)[0];
+      if (activeLine && titleLine && activeLine === titleLine) return;
+
+      ensureBlockLines(editor);
+      ensureTitleLine(editor);
+
+      const lines = getLineElements(editor);
+      if (!lines[0]) return;
+
+      if (name) {
+        lines[0].textContent = name;
+      } else {
+        lines[0].innerHTML = "<br>";
+      }
+
+      syncLineEmptyState(editor);
+      syncedTitleRef.current = name;
+      setTask((current) => (current ? { ...current, name } : current));
+      detailsRef.current = editor.innerHTML;
+    },
+    [],
+  );
 
   const updateHistoryAvailability = useCallback(() => {
     setCanUndo(historyIndexRef.current > 0);
@@ -463,6 +530,7 @@ export function TaskDetailsPanel({
       if (title && title !== taskNameRef.current) {
         const updatedTask = await renameTask(currentTaskId, title);
         taskNameRef.current = updatedTask.name;
+        syncedTitleRef.current = updatedTask.name;
         setTask((current) =>
           current ? { ...current, name: updatedTask.name } : current,
         );
@@ -568,6 +636,12 @@ export function TaskDetailsPanel({
     const editor = editorRef.current;
 
     if (!selection || !editor || !editor.contains(selection.anchorNode)) {
+      closeFormatMenu();
+      return;
+    }
+
+    const activeLine = getActiveLineElement(editor);
+    if (isTitleLine(editor, activeLine)) {
       closeFormatMenu();
       return;
     }
@@ -763,6 +837,7 @@ export function TaskDetailsPanel({
       historyIndexRef.current = index;
       previousTextRef.current = editor.textContent ?? "";
       syncEditorContent();
+      syncTitleToTaskList();
       updateHistoryAvailability();
       updateLineControls();
       closeFormatMenu();
@@ -778,6 +853,7 @@ export function TaskDetailsPanel({
       closeFormatMenu,
       scheduleAutoSave,
       syncEditorContent,
+      syncTitleToTaskList,
       updateHistoryAvailability,
       updateLineControls,
     ],
@@ -815,6 +891,54 @@ export function TaskDetailsPanel({
   }, [readEditorContent, resetHistory, task?.id, updateLineControls]);
 
   useEffect(() => {
+    if (!focusNoteAtEndRequest) return;
+    if (focusNoteAtEndRequest === handledFocusNoteAtEndRequestRef.current) {
+      return;
+    }
+    if (!isReadyRef.current || !editorRef.current || !taskId) return;
+    if (hydratedTaskIdRef.current !== taskId) return;
+
+    handledFocusNoteAtEndRequestRef.current = focusNoteAtEndRequest;
+
+    requestAnimationFrame(() => {
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      focusNoteAtEnd(editor);
+      updateLineControls();
+    });
+  }, [focusNoteAtEndRequest, task?.id, taskId, updateLineControls]);
+
+  useEffect(() => {
+    if (!taskId || !taskSnapshot || !isReadyRef.current) return;
+    if (taskId !== taskIdRef.current) return;
+
+    syncExternalTaskName(taskSnapshot.name);
+
+    if (isDateMenuOpen) return;
+
+    setTask((current) => {
+      if (!current) return current;
+
+      const dueDateSame = current.dueDate === taskSnapshot.dueDate;
+      const dueTimeSame =
+        current.dueTimeMinutes === taskSnapshot.dueTimeMinutes &&
+        current.dueDurationMinutes === taskSnapshot.dueDurationMinutes &&
+        current.dueTimeZone === taskSnapshot.dueTimeZone;
+
+      if (dueDateSame && dueTimeSame) return current;
+
+      return {
+        ...current,
+        dueDate: taskSnapshot.dueDate,
+        dueTimeMinutes: taskSnapshot.dueTimeMinutes,
+        dueDurationMinutes: taskSnapshot.dueDurationMinutes,
+        dueTimeZone: taskSnapshot.dueTimeZone,
+      };
+    });
+  }, [taskId, taskSnapshot, isDateMenuOpen, syncExternalTaskName]);
+
+  useEffect(() => {
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -827,6 +951,7 @@ export function TaskDetailsPanel({
       savedDetailsRef.current = "";
       detailsRef.current = "";
       taskNameRef.current = "";
+      syncedTitleRef.current = "";
       previousTextRef.current = "";
       taskIdRef.current = null;
       setSaveStatus("idle");
@@ -883,6 +1008,7 @@ export function TaskDetailsPanel({
         savedDetailsRef.current = loadedDetails;
         detailsRef.current = editorHtml;
         taskNameRef.current = loadedTask.name;
+        syncedTitleRef.current = loadedTask.name;
         taskIdRef.current = loadedTask.id;
         isReadyRef.current = true;
         setSaveStatus("idle");
@@ -916,10 +1042,12 @@ export function TaskDetailsPanel({
         title &&
         title !== taskNameRef.current
       ) {
-        void renameTask(previousTaskId, title);
+        void renameTask(previousTaskId, title).then(() => {
+          onTaskRenamed(previousTaskId, title);
+        });
       }
     };
-  }, [closeFormatMenu, taskId]);
+  }, [closeFormatMenu, onTaskRenamed, taskId]);
 
   useEffect(() => {
     return () => {
@@ -1043,6 +1171,7 @@ export function TaskDetailsPanel({
 
     previousTextRef.current = nextText;
     syncEditorContent();
+    syncTitleToTaskList();
     scheduleHistorySnapshot();
 
     if (nextSpaceCount > previousSpaceCount) {
@@ -1115,6 +1244,7 @@ export function TaskDetailsPanel({
       normalizeLinks(currentEditor);
       syncLineEmptyState(currentEditor);
       syncEditorContent();
+      syncTitleToTaskList();
       recordHistorySnapshot();
       scheduleAutoSave();
       updateLineControls();
@@ -1464,6 +1594,16 @@ export function TaskDetailsPanel({
     updateLineControls();
   }
 
+  function handleEditorContextMenu(event: React.MouseEvent<HTMLDivElement>) {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const line = (event.target as HTMLElement).closest(".detail-line");
+    if (line instanceof HTMLElement && isTitleLine(editor, line)) {
+      event.preventDefault();
+    }
+  }
+
   function handleEditorWrapperPointerDownCapture(
     event: React.PointerEvent<HTMLDivElement>,
   ) {
@@ -1589,6 +1729,11 @@ export function TaskDetailsPanel({
             }
           : current,
       );
+      onDueDateUpdated(task.id, task.dueDate, {
+        dueTimeMinutes: updated.dueTimeMinutes,
+        dueDurationMinutes: updated.dueDurationMinutes,
+        dueTimeZone: updated.dueTimeZone,
+      });
       setIsDateMenuOpen(false);
     } catch {
       return;
@@ -1726,12 +1871,13 @@ export function TaskDetailsPanel({
               onBlur={handleEditorBlur}
               onFocus={handleEditorFocus}
               onMouseUp={handleEditorMouseUp}
+              onContextMenu={handleEditorContextMenu}
               onMouseDown={handleEditorMouseDown}
               onClick={handleEditorClick}
               onKeyDown={handleEditorKeyDown}
               onKeyUp={handleEditorKeyUp}
               onScroll={updateLineControls}
-              className="task-details-editor min-h-[650px] reounded-xl w-full resize-y overflow-auto bg-white py-2 pl-10 pr-3 text-[17px] leading-[1.6] text-[#333333] outline-none dark:bg-white dark:text-[#333333] [&_.detail-line[data-line-type=bullet]]:pl-1 [&_.detail-line[data-line-type=checklist]]:pl-1 [&_.detail-line[data-line-type=h1]]:text-[24px] [&_.detail-line[data-line-type=h1]]:font-bold [&_.detail-line[data-line-type=h1]]:leading-[32px] [&_.detail-line[data-line-type=h2]]:text-[1.3125rem] [&_.detail-line[data-line-type=h2]]:font-semibold [&_.detail-line[data-line-type=h2]]:leading-[1.6875rem] [&_.detail-line[data-line-type=h3]]:text-[1.125rem] [&_.detail-line[data-line-type=h3]]:font-semibold [&_.detail-line[data-line-type=h3]]:leading-[1.5rem] [&_.detail-line[data-line-type=numbered]]:pl-1 [&_mark]:bg-yellow-200 [&_s]:line-through [&_strike]:line-through [&_u]:underline"
+              className="task-details-editor min-h-[650px] reounded-xl w-full resize-y overflow-auto bg-white py-2 pl-[60px] pr-3 text-[17px] leading-[1.6] text-[#333333] outline-none dark:bg-white dark:text-[#333333] [&_.detail-line[data-line-type=bullet]]:pl-1 [&_.detail-line[data-line-type=checklist]]:pl-1 [&_.detail-line[data-line-type=h1]]:text-[24px] [&_.detail-line[data-line-type=h1]]:font-bold [&_.detail-line[data-line-type=h1]]:leading-[32px] [&_.detail-line[data-line-type=h2]]:text-[1.3125rem] [&_.detail-line[data-line-type=h2]]:font-semibold [&_.detail-line[data-line-type=h2]]:leading-[1.6875rem] [&_.detail-line[data-line-type=h3]]:text-[1.125rem] [&_.detail-line[data-line-type=h3]]:font-semibold [&_.detail-line[data-line-type=h3]]:leading-[1.5rem] [&_.detail-line[data-line-type=numbered]]:pl-1 [&_mark]:bg-yellow-200 [&_s]:line-through [&_strike]:line-through [&_u]:underline"
             />
 
             {dropIndicator && (
@@ -1749,7 +1895,7 @@ export function TaskDetailsPanel({
                 {lineControls.map(({ lineId, top }) => (
                   <div
                     key={lineId}
-                    className="pointer-events-auto absolute left-1 flex h-[1.6em] -translate-y-1/2 items-center gap-0.5"
+                    className="pointer-events-auto absolute left-1 flex h-[1.6em] -translate-y-1/2 items-center"
                     style={{ top }}
                   >
                     <button
@@ -1758,22 +1904,22 @@ export function TaskDetailsPanel({
                       title="Add block below"
                       aria-haspopup="menu"
                       aria-expanded={addBlockMenu !== null}
-                      className="flex size-3 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                      className="flex size-[21px] rounded-lg py-[3px] px-[1px] items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-grab "
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={(event) => handlePlusClick(event, lineId)}
                     >
-                      <PlusIcon className="size-3" />
+                      <PlusIcon className="size-[28px]" />
                     </button>
                     <button
                       type="button"
                       aria-label="Drag line"
                       title="Drag to reorder line"
-                      className="flex size-3 cursor-grab items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 active:cursor-grabbing dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                      className="flex size-[28px] rounded-lg py-[3px] px-[1px] items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 active:cursor-grabbing dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-grab "
                       onPointerDown={(event) =>
                         handleLineDragStart(event, lineId)
                       }
                     >
-                      <InteractIcon className="size-2.5" />
+                      <InteractIcon className="size-4" />
                     </button>
                   </div>
                 ))}

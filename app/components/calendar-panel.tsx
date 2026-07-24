@@ -3,13 +3,15 @@
 import { useMemo, useState } from "react";
 import { BiChevronLeft, BiChevronRight } from "react-icons/bi";
 import { TaskListPanel } from "./task-list-panel";
-import type { TaskListItem } from "./todo-app";
+import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
 
 type CalendarTab = "list" | "calendar";
 
 type CalendarPanelProps = {
   tasks: TaskListItem[];
+  lists: TodoList[];
+  completingTaskIds: Set<string>;
   selectedTaskId: string | null;
   onToggleTask: (taskId: string) => void;
   onSelectTask: (taskId: string) => void;
@@ -17,6 +19,17 @@ type CalendarPanelProps = {
   onSetTaskDueDate?: (taskId: string, dateValue: string | null) => void;
   onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
   onSetTaskPriority?: (taskId: string, priority: number | null) => void;
+  onToggleTaskLabelTag?: (
+    taskId: string,
+    tagId: string,
+    assigned: boolean,
+  ) => Promise<{ id: string; label: string }[]>;
+  onLabelTagsChanged?: () => void;
+  onMoveTaskToList?: (
+    taskId: string,
+    sourceListId: string,
+    targetListId: string,
+  ) => void;
 };
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -313,6 +326,8 @@ function CalendarMonthView({
 
 export function CalendarPanel({
   tasks,
+  lists,
+  completingTaskIds,
   selectedTaskId,
   onToggleTask,
   onSelectTask,
@@ -320,6 +335,9 @@ export function CalendarPanel({
   onSetTaskDueDate,
   onSetTaskDueTime,
   onSetTaskPriority,
+  onToggleTaskLabelTag,
+  onLabelTagsChanged,
+  onMoveTaskToList,
 }: CalendarPanelProps) {
   const [activeTab, setActiveTab] = useState<CalendarTab>("calendar");
 
@@ -331,6 +349,8 @@ export function CalendarPanel({
         <TaskListPanel
           title="Calendar"
           tasks={tasks}
+          lists={lists}
+          completingTaskIds={completingTaskIds}
           selectedTaskId={selectedTaskId}
           embedded
           showHeader={false}
@@ -342,6 +362,9 @@ export function CalendarPanel({
           onSetTaskDueDate={onSetTaskDueDate}
           onSetTaskDueTime={onSetTaskDueTime}
           onSetTaskPriority={onSetTaskPriority}
+          onToggleTaskLabelTag={onToggleTaskLabelTag}
+          onLabelTagsChanged={onLabelTagsChanged}
+          onMoveTaskToList={onMoveTaskToList}
         />
       ) : (
         <CalendarMonthView

@@ -1,6 +1,13 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { BiSearch } from "react-icons/bi";
 import type { SearchTask } from "./todo-app";
 
@@ -14,31 +21,136 @@ type SearchModalProps = {
 
 const SEARCH_RESULT_LIMIT = 50;
 
+type SearchScope = "all" | "names" | "content";
+
+const SEARCH_SCOPE_TABS: { id: SearchScope; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "names", label: "Names" },
+  { id: "content", label: "Content" },
+];
+
 type IndexedSearchTask = SearchTask & {
   normalizedName: string;
+  normalizedDetails: string;
+  plainDetails: string;
 };
 
-function buildSearchIndex(tasks: SearchTask[]) {
-  return tasks.map((task) => ({
-    ...task,
-    normalizedName: task.name.toLowerCase(),
-  }));
+function detailsToPlainText(details: string): string {
+  if (!details.trim()) return "";
+
+  const container = document.createElement("div");
+  container.innerHTML = details;
+  return (container.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
-function filterTasks(index: IndexedSearchTask[], query: string) {
+function buildSearchIndex(tasks: SearchTask[]) {
+  return tasks.map((task) => {
+    const plainDetails = detailsToPlainText(task.details);
+
+    return {
+      ...task,
+      normalizedName: task.name.toLowerCase(),
+      plainDetails,
+      normalizedDetails: plainDetails.toLowerCase(),
+    };
+  });
+}
+
+function taskMatchesScope(
+  task: IndexedSearchTask,
+  query: string,
+  scope: SearchScope,
+) {
+  const trimmed = query.trim().toLowerCase();
+  const nameMatch = task.normalizedName.includes(trimmed);
+  const contentMatch = task.normalizedDetails.includes(trimmed);
+
+  if (scope === "names") return nameMatch;
+  if (scope === "content") return contentMatch;
+  return nameMatch || contentMatch;
+}
+
+function filterTasks(
+  index: IndexedSearchTask[],
+  query: string,
+  scope: SearchScope,
+) {
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) return [];
 
   const matches: IndexedSearchTask[] = [];
 
   for (const task of index) {
-    if (task.normalizedName.includes(trimmed)) {
+    if (taskMatchesScope(task, trimmed, scope)) {
       matches.push(task);
       if (matches.length >= SEARCH_RESULT_LIMIT) break;
     }
   }
 
   return matches;
+}
+
+function getDetailsSnippet(
+  plainText: string,
+  query: string,
+  maxLength = 96,
+): string | null {
+  const trimmed = query.trim();
+  if (!trimmed || !plainText) return null;
+
+  const lowerText = plainText.toLowerCase();
+  const lowerQuery = trimmed.toLowerCase();
+  const matchIndex = lowerText.indexOf(lowerQuery);
+  if (matchIndex === -1) return null;
+
+  const matchLength = lowerQuery.length;
+  const remaining = maxLength - matchLength;
+  const beforeLength = Math.min(Math.floor(remaining / 2), matchIndex);
+  const afterLength = Math.min(
+    maxLength - beforeLength - matchLength,
+    plainText.length - matchIndex - matchLength,
+  );
+
+  const start = matchIndex - beforeLength;
+  const end = matchIndex + matchLength + afterLength;
+
+  let snippet = plainText.slice(start, end);
+  if (start > 0) snippet = `…${snippet}`;
+  if (end < plainText.length) snippet = `${snippet}…`;
+
+  return snippet;
+}
+
+function highlightSearchMatch(text: string, query: string): ReactNode {
+  const trimmed = query.trim();
+  if (!trimmed) return text;
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = trimmed.toLowerCase();
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let matchIndex = lowerText.indexOf(lowerQuery, lastIndex);
+
+  while (matchIndex !== -1) {
+    if (matchIndex > lastIndex) {
+      parts.push(text.slice(lastIndex, matchIndex));
+    }
+
+    parts.push(
+      <span key={matchIndex} className="font-bold text-[#444444]">
+        {text.slice(matchIndex, matchIndex + lowerQuery.length)}
+      </span>,
+    );
+
+    lastIndex = matchIndex + lowerQuery.length;
+    matchIndex = lowerText.indexOf(lowerQuery, lastIndex);
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts;
 }
 
 export function SearchModal({
@@ -49,8 +161,11 @@ export function SearchModal({
   onToggleTask,
 }: SearchModalProps) {
   const [query, setQuery] = useState("");
+  const [searchScope, setSearchScope] = useState<SearchScope>("all");
+  const [activeIndex, setActiveIndex] = useState(-1);
   const deferredQuery = useDeferredValue(query);
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultRefs = useRef<(HTMLLIElement | null)[]>([]);
   const isFiltering = query !== deferredQuery;
 
   const searchIndex = useMemo(
@@ -59,13 +174,26 @@ export function SearchModal({
   );
 
   const results = useMemo(
-    () => filterTasks(searchIndex, deferredQuery),
-    [deferredQuery, searchIndex],
+    () => filterTasks(searchIndex, deferredQuery, searchScope),
+    [deferredQuery, searchIndex, searchScope],
   );
+
+  useEffect(() => {
+    setActiveIndex(results.length > 0 ? 0 : -1);
+    resultRefs.current = [];
+  }, [results]);
+
+  useEffect(() => {
+    if (activeIndex < 0) return;
+
+    resultRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, results]);
 
   useEffect(() => {
     if (!open) {
       setQuery("");
+      setSearchScope("all");
+      setActiveIndex(-1);
       return;
     }
 
@@ -89,9 +217,49 @@ export function SearchModal({
     };
   }, [open, onClose]);
 
+  function selectTask(task: SearchTask) {
+    onSelectTask(task.id, task.listId);
+    onClose();
+  }
+
+  function handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (results.length === 0) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((current) =>
+        current < 0 ? 0 : Math.min(current + 1, results.length - 1),
+      );
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((current) =>
+        current < 0 ? results.length - 1 : Math.max(current - 1, 0),
+      );
+      return;
+    }
+
+    if (event.key === "Enter" && activeIndex >= 0) {
+      event.preventDefault();
+      const task = results[activeIndex];
+      if (task) {
+        selectTask(task);
+      }
+    }
+  }
+
   if (!open) return null;
 
   const trimmedQuery = query.trim();
+  const highlightQuery = deferredQuery.trim();
+  const emptyStateMessage =
+    searchScope === "names"
+      ? "Start typing to search task names"
+      : searchScope === "content"
+        ? "Start typing to search task content"
+        : "Start typing to search task names and notes";
 
   return (
     <div
@@ -119,9 +287,32 @@ export function SearchModal({
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search tasks"
+              onKeyDown={handleInputKeyDown}
+              placeholder="Search tasks and notes"
               className="h-[35px] w-full bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-50"
             />
+          </div>
+          <div
+            className="mt-3 flex flex-wrap gap-2"
+            role="tablist"
+            aria-label="Search scope"
+          >
+            {SEARCH_SCOPE_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={searchScope === tab.id}
+                onClick={() => setSearchScope(tab.id)}
+                className={`rounded-full px-[13px] py-[5px] text-xs font-medium transition-colors cursor-pointer ${
+                  searchScope === tab.id
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "bg-zinc-200 text-zinc-600 hover:bg-zinc-400 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -132,7 +323,7 @@ export function SearchModal({
         >
           {!trimmedQuery ? (
             <p className="px-4 py-6 text-sm text-zinc-500 dark:text-zinc-400">
-              Start typing to search task names
+              {emptyStateMessage}
             </p>
           ) : results.length === 0 ? (
             <p className="px-4 py-6 text-sm text-zinc-500 dark:text-zinc-400">
@@ -140,11 +331,34 @@ export function SearchModal({
             </p>
           ) : (
             <>
-              <ul>
-                {results.map((task) => (
+              <ul role="listbox" aria-activedescendant={activeIndex >= 0 ? `search-result-${results[activeIndex]?.id}` : undefined}>
+                {results.map((task, index) => {
+                  const highlightQueryLower = highlightQuery.toLowerCase();
+                  const contentMatches =
+                    highlightQueryLower.length > 0 &&
+                    task.normalizedDetails.includes(highlightQueryLower);
+                  const showDetailsSnippet =
+                    contentMatches &&
+                    (searchScope === "all" ||
+                      searchScope === "content");
+                  const detailsSnippet = showDetailsSnippet
+                    ? getDetailsSnippet(task.plainDetails, highlightQuery)
+                    : null;
+
+                  return (
                   <li
                     key={task.id}
-                    className="flex min-h-[44px] items-center gap-3 border-b border-zinc-100 px-4 py-2 dark:border-zinc-800"
+                    id={`search-result-${task.id}`}
+                    ref={(element) => {
+                      resultRefs.current[index] = element;
+                    }}
+                    role="option"
+                    aria-selected={index === activeIndex}
+                    className={`flex min-h-[44px] items-center gap-3 border-b border-zinc-100 px-4 py-2 dark:border-zinc-800 ${
+                      index === activeIndex
+                        ? "bg-zinc-100 dark:bg-zinc-800"
+                        : ""
+                    }`}
                   >
                     <input
                       type="checkbox"
@@ -155,10 +369,7 @@ export function SearchModal({
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        onSelectTask(task.id, task.listId);
-                        onClose();
-                      }}
+                      onClick={() => selectTask(task)}
                       className="min-w-0 flex-1 text-left"
                     >
                       <span
@@ -168,14 +379,20 @@ export function SearchModal({
                             : "text-zinc-900 dark:text-zinc-50"
                         }`}
                       >
-                        {task.name}
+                        {highlightSearchMatch(task.name, highlightQuery)}
                       </span>
                       <span className="block truncate text-xs text-zinc-400 dark:text-zinc-500">
                         {task.listName}
                       </span>
+                      {detailsSnippet && (
+                        <span className="mt-0.5 block truncate text-xs text-zinc-500 dark:text-zinc-400">
+                          {highlightSearchMatch(detailsSnippet, highlightQuery)}
+                        </span>
+                      )}
                     </button>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
               {results.length >= SEARCH_RESULT_LIMIT && (
                 <p className="px-4 py-3 text-xs text-zinc-400 dark:text-zinc-500">

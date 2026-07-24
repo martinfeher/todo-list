@@ -1,12 +1,16 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
-import { BiCalendar, BiSortAlt2 } from "react-icons/bi";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { BiSortAlt2 } from "react-icons/bi";
 import { LuPlus } from "react-icons/lu";
-import { InteractIcon } from "./line-control-icons";
-import { TaskDatePicker } from "./task-date-picker";
-import { ThreeDotsIcon } from "./three-dots-icon";
-import type { TaskListItem } from "./todo-app";
+import { createLabelTag, getLabelTags } from "@/app/actions/todo";
+import { TaskListTaskRow } from "./task-list-task-row";
+import type { LabelTag } from "./task-tag-selector";
+import {
+  TaskRowContextMenu,
+  type TaskRowContextMenuView,
+} from "./task-row-context-menu";
+import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
 import {
   getTaskDropIndex,
@@ -25,6 +29,7 @@ type SortOption = {
 
 type DropIndicatorState = {
   top: number;
+  section: "pinned" | "unpinned";
 };
 
 type TaskDragState = {
@@ -34,6 +39,7 @@ type TaskDragState = {
   dropIndex: number;
   taskIds: string[];
   pointerId: number;
+  section: "pinned" | "unpinned";
 };
 
 const SORT_OPTIONS: SortOption[] = [
@@ -42,6 +48,16 @@ const SORT_OPTIONS: SortOption[] = [
   { field: "title", direction: "asc", label: "Title (A-Z)" },
   { field: "title", direction: "desc", label: "Title (Z-A)" },
 ];
+
+const ROW_DRAG_THRESHOLD_PX = 5;
+
+function shouldStartRowDrag(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return true;
+
+  return !target.closest(
+    "input, button, textarea, select, a, [role='menu'], [role='menuitem']",
+  );
+}
 
 function startOfDay(date: Date) {
   const next = new Date(date);
@@ -120,42 +136,77 @@ function sortTasks(
   return sorted;
 }
 
+type PointerContextMenuState = {
+  taskId: string;
+  x: number;
+  y: number;
+  view: TaskRowContextMenuView;
+};
+
 type TaskListPanelProps = {
   title: string | null;
   tasks: TaskListItem[];
+  lists: TodoList[];
+  completingTaskIds: Set<string>;
   selectedTaskId: string | null;
   expanded?: boolean;
   embedded?: boolean;
   showHeader?: boolean;
   showAddTask?: boolean;
+  isTagFilter?: boolean;
   listId?: string | null;
   onAddTask: (name: string) => void;
   onToggleTask: (taskId: string) => void;
   onSelectTask: (taskId: string) => void;
   onRenameTask: (taskId: string, name: string) => void;
-  onReorderTasks?: (listId: string, taskIds: string[]) => void;
+  onTaskNameChange?: (taskId: string, name: string) => void;
+  onReorderTasks?: (
+    listId: string,
+    taskIds: string[],
+    section: "pinned" | "unpinned",
+  ) => void;
   onSetTaskDueDate?: (taskId: string, dateValue: string | null) => void;
   onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
   onSetTaskPriority?: (taskId: string, priority: number | null) => void;
+  onSetTaskPinned?: (taskId: string, pinned: boolean) => void;
+  onToggleTaskLabelTag?: (
+    taskId: string,
+    tagId: string,
+    assigned: boolean,
+  ) => Promise<{ id: string; label: string }[]>;
+  onLabelTagsChanged?: () => void;
+  onMoveTaskToList?: (
+    taskId: string,
+    sourceListId: string,
+    targetListId: string,
+  ) => void;
 };
 
 export function TaskListPanel({
   title,
   tasks,
+  lists,
+  completingTaskIds,
   selectedTaskId,
   expanded = false,
   embedded = false,
   showHeader = true,
   showAddTask = false,
+  isTagFilter = false,
   listId = null,
   onAddTask,
   onToggleTask,
   onSelectTask,
   onRenameTask,
+  onTaskNameChange,
   onReorderTasks,
   onSetTaskDueDate,
   onSetTaskDueTime,
   onSetTaskPriority,
+  onSetTaskPinned,
+  onToggleTaskLabelTag,
+  onLabelTagsChanged,
+  onMoveTaskToList,
 }: TaskListPanelProps) {
   const [newTaskName, setNewTaskName] = useState("");
   const [isAddingTask, setIsAddingTask] = useState(false);
@@ -170,23 +221,99 @@ export function TaskListPanel({
   const [openPriorityMenuTaskId, setOpenPriorityMenuTaskId] = useState<
     string | null
   >(null);
+  const [openTagMenuTaskId, setOpenTagMenuTaskId] = useState<string | null>(
+    null,
+  );
+  const [openMoveMenuTaskId, setOpenMoveMenuTaskId] = useState<string | null>(
+    null,
+  );
+  const [moveQuery, setMoveQuery] = useState("");
+  const [availableTags, setAvailableTags] = useState<LabelTag[]>([]);
+  const [assignedTagIds, setAssignedTagIds] = useState<string[]>([]);
+  const [tagQuery, setTagQuery] = useState("");
+  const [isTagSubmitting, setIsTagSubmitting] = useState(false);
+  const [pointerContextMenu, setPointerContextMenu] =
+    useState<PointerContextMenuState | null>(null);
   const [dropIndicator, setDropIndicator] = useState<DropIndicatorState | null>(
     null,
   );
+
+  const activeTagMenuTaskId =
+    openTagMenuTaskId ??
+    (pointerContextMenu?.view === "tag" ? pointerContextMenu.taskId : null);
+
+  useEffect(() => {
+    if (!activeTagMenuTaskId) return;
+
+    let cancelled = false;
+
+    void getLabelTags()
+      .then((tags) => {
+        if (!cancelled) {
+          setAvailableTags(tags);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAvailableTags([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTagMenuTaskId]);
+
+  useEffect(() => {
+    if (!activeTagMenuTaskId) return;
+
+    const task = orderedTasks.find((item) => item.id === activeTagMenuTaskId);
+    if (!task) return;
+
+    setAssignedTagIds(task.tags.map((tag) => tag.id));
+  }, [activeTagMenuTaskId, orderedTasks]);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const newTaskInputRef = useRef<HTMLInputElement>(null);
+  const keepAddTaskOpenRef = useRef(false);
   const titleEditReadyRef = useRef(false);
   const sortMenuRef = useRef<HTMLDivElement>(null);
   const taskDateMenuRef = useRef<HTMLDivElement>(null);
   const taskContextMenuRef = useRef<HTMLDivElement>(null);
+  const pointerContextMenuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const pinnedListRef = useRef<HTMLUListElement>(null);
   const dragStateRef = useRef<TaskDragState | null>(null);
+  const suppressRowClickRef = useRef(false);
 
   const canReorder = showAddTask && Boolean(listId && onReorderTasks);
+
+  const pinnedTasks = useMemo(
+    () =>
+      showAddTask ? orderedTasks.filter((task) => Boolean(task.pinned)) : [],
+    [orderedTasks, showAddTask],
+  );
+
+  const listTasks = useMemo(
+    () =>
+      showAddTask
+        ? orderedTasks.filter((task) => !Boolean(task.pinned))
+        : orderedTasks,
+    [orderedTasks, showAddTask],
+  );
 
   useEffect(() => {
     setOrderedTasks(tasks);
   }, [tasks]);
+
+  useEffect(() => {
+    if (!editingTaskId) return;
+
+    const task = tasks.find((item) => item.id === editingTaskId);
+    if (!task || task.name === titleDraft) return;
+    if (document.activeElement === titleInputRef.current) return;
+
+    setTitleDraft(task.name);
+  }, [tasks, editingTaskId, titleDraft]);
 
   useEffect(() => {
     setEditingTaskId(null);
@@ -194,6 +321,11 @@ export function TaskListPanel({
     setOpenDatePickerTaskId(null);
     setOpenMenuTaskId(null);
     setOpenPriorityMenuTaskId(null);
+    setOpenTagMenuTaskId(null);
+    setOpenMoveMenuTaskId(null);
+    resetTagMenuState();
+    resetMoveMenuState();
+    setPointerContextMenu(null);
     setIsAddingTask(false);
     setNewTaskName("");
   }, [title]);
@@ -204,19 +336,76 @@ export function TaskListPanel({
 
       if (taskDateMenuRef.current?.contains(target)) return;
       if (taskContextMenuRef.current?.contains(target)) return;
+      if (pointerContextMenuRef.current?.contains(target)) return;
 
       setOpenDatePickerTaskId(null);
       setOpenMenuTaskId(null);
       setOpenPriorityMenuTaskId(null);
+      setOpenTagMenuTaskId(null);
+      setOpenMoveMenuTaskId(null);
+      resetTagMenuState();
+      resetMoveMenuState();
+      setPointerContextMenu(null);
     }
 
-    if (!openDatePickerTaskId && !openMenuTaskId && !openPriorityMenuTaskId) return;
+    if (
+      !openDatePickerTaskId &&
+      !openMenuTaskId &&
+      !openPriorityMenuTaskId &&
+      !openTagMenuTaskId &&
+      !openMoveMenuTaskId &&
+      !pointerContextMenu
+    ) {
+      return;
+    }
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [openDatePickerTaskId, openMenuTaskId, openPriorityMenuTaskId]);
+  }, [
+    openDatePickerTaskId,
+    openMenuTaskId,
+    openPriorityMenuTaskId,
+    openTagMenuTaskId,
+    openMoveMenuTaskId,
+    pointerContextMenu,
+  ]);
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+
+      setOpenMenuTaskId(null);
+      setOpenPriorityMenuTaskId(null);
+      setOpenTagMenuTaskId(null);
+      setOpenMoveMenuTaskId(null);
+      resetTagMenuState();
+      resetMoveMenuState();
+      setPointerContextMenu(null);
+    }
+
+    if (
+      !openMenuTaskId &&
+      !openPriorityMenuTaskId &&
+      !openTagMenuTaskId &&
+      !openMoveMenuTaskId &&
+      !pointerContextMenu
+    ) {
+      return;
+    }
+
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [
+    openMenuTaskId,
+    openPriorityMenuTaskId,
+    openTagMenuTaskId,
+    openMoveMenuTaskId,
+    pointerContextMenu,
+  ]);
 
   useEffect(() => {
     if (!editingTaskId) {
@@ -225,8 +414,12 @@ export function TaskListPanel({
     }
 
     requestAnimationFrame(() => {
-      titleInputRef.current?.focus();
-      titleInputRef.current?.select();
+      const input = titleInputRef.current;
+      if (!input) return;
+
+      input.focus();
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
       titleEditReadyRef.current = true;
     });
   }, [editingTaskId]);
@@ -262,14 +455,29 @@ export function TaskListPanel({
       return;
     }
 
+    keepAddTaskOpenRef.current = true;
     onAddTask(newTaskName);
     setNewTaskName("");
-    setIsAddingTask(false);
+
+    requestAnimationFrame(() => {
+      newTaskInputRef.current?.focus();
+      keepAddTaskOpenRef.current = false;
+    });
   }
 
   function startTitleEdit(task: TaskListItem) {
     setEditingTaskId(task.id);
     setTitleDraft(task.name);
+  }
+
+  function handleTaskClick(task: TaskListItem) {
+    if (suppressRowClickRef.current) {
+      suppressRowClickRef.current = false;
+      return;
+    }
+
+    onSelectTask(task.id);
+    startTitleEdit(task);
   }
 
   function cancelTitleEdit(task: TaskListItem) {
@@ -308,34 +516,181 @@ export function TaskListPanel({
   }
 
   function applySort(field: SortField, direction: SortDirection) {
-    const sorted = sortTasks(orderedTasks, field, direction);
-    setOrderedTasks(sorted);
+    const pinned = orderedTasks.filter((task) => task.pinned);
+    const unpinned = orderedTasks.filter((task) => !task.pinned);
+    const sorted = sortTasks(unpinned, field, direction);
+    setOrderedTasks([...pinned, ...sorted]);
 
     if (listId && onReorderTasks) {
       onReorderTasks(
         listId,
         sorted.map((task) => task.id),
+        "unpinned",
       );
     }
 
     setIsSortMenuOpen(false);
   }
 
-  function toggleDatePicker(taskId: string) {
+  function resetTagMenuState() {
+    setAssignedTagIds([]);
+    setTagQuery("");
+    setIsTagSubmitting(false);
+  }
+
+  function resetMoveMenuState() {
+    setMoveQuery("");
+  }
+
+  function resolveTaskListId(task: TaskListItem): string | null {
+    return task.listId ?? listId ?? null;
+  }
+
+  function initTagMenuForTask(taskId: string) {
+    const task = orderedTasks.find((item) => item.id === taskId);
+    setAssignedTagIds(task?.tags.map((tag) => tag.id) ?? []);
+    setTagQuery("");
+    setIsTagSubmitting(false);
+  }
+
+  function closeTaskMenus() {
     setOpenMenuTaskId(null);
     setOpenPriorityMenuTaskId(null);
+    setOpenTagMenuTaskId(null);
+    setOpenMoveMenuTaskId(null);
+    resetTagMenuState();
+    resetMoveMenuState();
+    setPointerContextMenu(null);
+  }
+
+  function toggleDatePicker(taskId: string) {
+    closeTaskMenus();
     setOpenDatePickerTaskId((current) => (current === taskId ? null : taskId));
   }
 
   function toggleTaskMenu(taskId: string) {
     setOpenDatePickerTaskId(null);
+    setPointerContextMenu(null);
     setOpenPriorityMenuTaskId(null);
+    setOpenTagMenuTaskId(null);
+    setOpenMoveMenuTaskId(null);
+    resetTagMenuState();
+    resetMoveMenuState();
     setOpenMenuTaskId((current) => (current === taskId ? null : taskId));
   }
 
   function openPriorityMenu(taskId: string) {
     setOpenMenuTaskId(null);
+    setOpenTagMenuTaskId(null);
+    setOpenMoveMenuTaskId(null);
+    resetTagMenuState();
+    resetMoveMenuState();
+    if (pointerContextMenu?.taskId === taskId) {
+      setPointerContextMenu({ ...pointerContextMenu, view: "priority" });
+      return;
+    }
+
+    setPointerContextMenu(null);
     setOpenPriorityMenuTaskId(taskId);
+  }
+
+  function openTagMenu(taskId: string) {
+    setOpenMenuTaskId(null);
+    setOpenPriorityMenuTaskId(null);
+    setOpenMoveMenuTaskId(null);
+    resetMoveMenuState();
+    initTagMenuForTask(taskId);
+    if (pointerContextMenu?.taskId === taskId) {
+      setPointerContextMenu({ ...pointerContextMenu, view: "tag" });
+      return;
+    }
+
+    setPointerContextMenu(null);
+    setOpenTagMenuTaskId(taskId);
+  }
+
+  function openMoveMenu(taskId: string) {
+    setOpenMenuTaskId(null);
+    setOpenPriorityMenuTaskId(null);
+    setOpenTagMenuTaskId(null);
+    resetTagMenuState();
+    setMoveQuery("");
+    if (pointerContextMenu?.taskId === taskId) {
+      setPointerContextMenu({ ...pointerContextMenu, view: "moveTo" });
+      return;
+    }
+
+    setPointerContextMenu(null);
+    setOpenMoveMenuTaskId(taskId);
+  }
+
+  function handleMoveTaskToList(taskId: string, targetListId: string) {
+    if (!onMoveTaskToList) return;
+
+    const task = orderedTasks.find((item) => item.id === taskId);
+    if (!task) return;
+
+    const sourceListId = resolveTaskListId(task);
+    if (!sourceListId || sourceListId === targetListId) return;
+
+    onMoveTaskToList(taskId, sourceListId, targetListId);
+    closeTaskMenus();
+  }
+
+  async function handleToggleTag(taskId: string, tagId: string) {
+    if (!onToggleTaskLabelTag) return;
+
+    const isAssigned = assignedTagIds.includes(tagId);
+    setIsTagSubmitting(true);
+
+    try {
+      const updatedTags = await onToggleTaskLabelTag(taskId, tagId, !isAssigned);
+      setAssignedTagIds(updatedTags.map((tag) => tag.id));
+    } catch {
+      return;
+    } finally {
+      setIsTagSubmitting(false);
+    }
+  }
+
+  async function handleCreateTag(taskId: string, label: string) {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+
+    setIsTagSubmitting(true);
+
+    try {
+      const tag = await createLabelTag(trimmed);
+      setAvailableTags((current) => {
+        if (current.some((item) => item.id === tag.id)) {
+          return current;
+        }
+
+        return [...current, tag].sort((a, b) =>
+          a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
+        );
+      });
+
+      if (onToggleTaskLabelTag) {
+        const updatedTags = await onToggleTaskLabelTag(taskId, tag.id, true);
+        setAssignedTagIds(updatedTags.map((item) => item.id));
+      } else {
+        setAssignedTagIds((current) =>
+          current.includes(tag.id) ? current : [...current, tag.id],
+        );
+      }
+
+      setTagQuery("");
+      onLabelTagsChanged?.();
+    } catch {
+      return;
+    } finally {
+      setIsTagSubmitting(false);
+    }
+  }
+
+  function handleConfirmTags() {
+    closeTaskMenus();
   }
 
   function handleSelectTaskDueDate(taskId: string, dateValue: string) {
@@ -349,24 +704,56 @@ export function TaskListPanel({
 
   function handleClearTaskDueDate(taskId: string) {
     onSetTaskDueDate?.(taskId, null);
-    setOpenMenuTaskId(null);
+    closeTaskMenus();
   }
 
   function handleSelectTaskPriority(taskId: string, priority: number) {
     onSetTaskPriority?.(taskId, priority);
-    setOpenPriorityMenuTaskId(null);
+    closeTaskMenus();
+  }
+
+  function handleToggleTaskPinned(task: TaskListItem) {
+    onSetTaskPinned?.(task.id, !task.pinned);
+    closeTaskMenus();
   }
 
   function handleClearTaskPriority(taskId: string) {
     onSetTaskPriority?.(taskId, null);
+    closeTaskMenus();
+  }
+
+  function handleTaskContextMenu(
+    event: React.MouseEvent<HTMLLIElement>,
+    task: TaskListItem,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    onSelectTask(task.id);
+    setOpenDatePickerTaskId(null);
+    setOpenMenuTaskId(null);
     setOpenPriorityMenuTaskId(null);
+    setOpenTagMenuTaskId(null);
+    setOpenMoveMenuTaskId(null);
+    resetTagMenuState();
+    resetMoveMenuState();
+    setPointerContextMenu({
+      taskId: task.id,
+      x: event.clientX,
+      y: event.clientY,
+      view: "main",
+    });
   }
 
   function handleDragMove(event: PointerEvent) {
-    const list = listRef.current;
     const dragState = dragStateRef.current;
+    if (!dragState) return;
 
-    if (!list || !dragState) return;
+    const list =
+      dragState.section === "pinned"
+        ? pinnedListRef.current
+        : listRef.current;
+    if (!list) return;
 
     const rows = getTaskRowElements(list);
     const dropIndex = getTaskDropIndex(
@@ -390,11 +777,37 @@ export function TaskListPanel({
       indicatorTop = rect.top - listRect.top;
     }
 
-    setDropIndicator({ top: indicatorTop });
+    setDropIndicator({ top: indicatorTop, section: dragState.section });
+  }
+
+  function beginTaskDrag(
+    sourceRow: HTMLElement,
+    pointerId: number,
+    sourceIndex: number,
+    taskIds: string[],
+    section: "pinned" | "unpinned",
+  ) {
+    dragStateRef.current = {
+      sourceRow,
+      captureTarget: sourceRow,
+      sourceIndex,
+      dropIndex: sourceIndex,
+      taskIds,
+      pointerId,
+      section,
+    };
+
+    sourceRow.classList.add("opacity-50");
+    sourceRow.setPointerCapture(pointerId);
+    document.body.style.cursor = "grabbing";
+    document.addEventListener("pointermove", handleDragMove);
+    document.addEventListener("pointerup", handleDragEnd);
+    document.addEventListener("pointercancel", handleDragEnd);
   }
 
   function handleDragEnd() {
     const dragState = dragStateRef.current;
+    const wasDragging = dragState !== null;
 
     document.removeEventListener("pointermove", handleDragMove);
     document.removeEventListener("pointerup", handleDragEnd);
@@ -418,48 +831,155 @@ export function TaskListPanel({
       );
 
       if (nextIds.join(",") !== dragState.taskIds.join(",")) {
-        onReorderTasks(listId, nextIds);
+        onReorderTasks(listId, nextIds, dragState.section);
       }
+    }
+
+    if (wasDragging) {
+      suppressRowClickRef.current = true;
     }
 
     dragStateRef.current = null;
   }
 
-  function handleTaskDragStart(
-    event: React.PointerEvent<HTMLButtonElement>,
+  function handleRowPointerDown(
+    event: React.PointerEvent<HTMLLIElement>,
     taskId: string,
+    section: "pinned" | "unpinned",
   ) {
-    event.preventDefault();
-    event.stopPropagation();
+    if (!canReorder || event.button !== 0) return;
+    if (!shouldStartRowDrag(event.target)) return;
 
-    const list = listRef.current;
-    if (!list || !canReorder) return;
+    const list =
+      section === "pinned" ? pinnedListRef.current : listRef.current;
+    if (!list) return;
 
     const rows = getTaskRowElements(list);
     const sourceRow = rows.find((row) => row.dataset.taskId === taskId);
     if (!sourceRow) return;
 
-    const sourceIndex = rows.indexOf(sourceRow);
+    const dragRow = sourceRow;
+    const sourceIndex = rows.indexOf(dragRow);
     if (sourceIndex < 0) return;
 
-    const taskIds = orderedTasks.map((task) => task.id);
+    const taskIds =
+      section === "pinned"
+        ? pinnedTasks.map((task) => task.id)
+        : listTasks.map((task) => task.id);
 
-    dragStateRef.current = {
-      sourceRow,
-      captureTarget: event.currentTarget,
-      sourceIndex,
-      dropIndex: sourceIndex,
-      taskIds,
-      pointerId: event.pointerId,
-    };
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const pointerId = event.pointerId;
+    let dragStarted = false;
 
-    sourceRow.classList.add("opacity-50");
-    event.currentTarget.setPointerCapture(event.pointerId);
-    document.body.style.cursor = "grabbing";
-    document.addEventListener("pointermove", handleDragMove);
-    document.addEventListener("pointerup", handleDragEnd);
-    document.addEventListener("pointercancel", handleDragEnd);
+    function clearPendingListeners() {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("pointercancel", onPointerUp);
+    }
+
+    function onPointerMove(moveEvent: PointerEvent) {
+      if (moveEvent.pointerId !== pointerId) return;
+
+      if (dragStarted) return;
+
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+      if (Math.hypot(dx, dy) < ROW_DRAG_THRESHOLD_PX) return;
+
+      dragStarted = true;
+      clearPendingListeners();
+      beginTaskDrag(dragRow, pointerId, sourceIndex, taskIds, section);
+    }
+
+    function onPointerUp(upEvent: PointerEvent) {
+      if (upEvent.pointerId !== pointerId) return;
+      clearPendingListeners();
+    }
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerUp);
   }
+
+  function renderTaskItems(
+    taskItems: TaskListItem[],
+    section: "pinned" | "unpinned",
+  ) {
+    const hasTagActions = Boolean(onToggleTaskLabelTag);
+    const hasMoveActions = Boolean(onMoveTaskToList) && lists.length > 1;
+
+    return taskItems.map((task) => (
+      <TaskListTaskRow
+        key={task.id}
+        task={task}
+        isCompleting={completingTaskIds.has(task.id)}
+        selectedTaskId={selectedTaskId}
+        editingTaskId={editingTaskId}
+        titleDraft={titleDraft}
+        titleInputRef={titleInputRef}
+        showDragHandle={canReorder}
+        openDatePickerTaskId={openDatePickerTaskId}
+        openMenuTaskId={openMenuTaskId}
+        openPriorityMenuTaskId={openPriorityMenuTaskId}
+        openTagMenuTaskId={openTagMenuTaskId}
+        openMoveMenuTaskId={openMoveMenuTaskId}
+        lists={lists}
+        currentListId={resolveTaskListId(task)}
+        moveQuery={moveQuery}
+        availableTags={availableTags}
+        assignedTagIds={assignedTagIds}
+        tagQuery={tagQuery}
+        isTagSubmitting={isTagSubmitting}
+        taskDateMenuRef={taskDateMenuRef}
+        taskContextMenuRef={taskContextMenuRef}
+        dueDateLabel={formatTaskDueDateLabel(task.dueDate)}
+        onTaskClick={handleTaskClick}
+        onTaskContextMenu={handleTaskContextMenu}
+        onToggleTask={onToggleTask}
+        onTitleDraftChange={(taskId, value) => {
+          setTitleDraft(value);
+          onTaskNameChange?.(taskId, value);
+        }}
+        onCommitTitleEdit={(item) => {
+          if (!titleEditReadyRef.current) return;
+          commitTitleEdit(item);
+        }}
+        onTitleKeyDown={handleTitleKeyDown}
+        onTaskDragStart={(event, taskId) =>
+          handleRowPointerDown(event, taskId, section)
+        }
+        onToggleDatePicker={toggleDatePicker}
+        onSelectTaskDueDate={handleSelectTaskDueDate}
+        onSaveTaskDueTime={handleSaveTaskDueTime}
+        onToggleTaskMenu={toggleTaskMenu}
+        onStartTitleEdit={startTitleEdit}
+        onToggleTaskPinned={handleToggleTaskPinned}
+        onOpenPriorityMenu={openPriorityMenu}
+        onOpenTagMenu={openTagMenu}
+        onOpenMoveMenu={openMoveMenu}
+        onMoveQueryChange={setMoveQuery}
+        onMoveTaskToList={handleMoveTaskToList}
+        onTagQueryChange={setTagQuery}
+        onToggleTag={(tagId) => handleToggleTag(task.id, tagId)}
+        onCreateTag={(label) => handleCreateTag(task.id, label)}
+        onClearTaskDueDate={handleClearTaskDueDate}
+        onSelectTaskPriority={handleSelectTaskPriority}
+        onClearTaskPriority={handleClearTaskPriority}
+        onConfirmTags={handleConfirmTags}
+        onCloseTaskMenu={closeTaskMenus}
+        hasDueDateActions={Boolean(onSetTaskDueDate)}
+        hasPriorityActions={Boolean(onSetTaskPriority)}
+        hasPinActions={Boolean(onSetTaskPinned)}
+        hasTagActions={hasTagActions}
+        hasMoveActions={hasMoveActions}
+      />
+    ));
+  }
+
+  const pointerMenuTask = pointerContextMenu
+    ? orderedTasks.find((task) => task.id === pointerContextMenu.taskId)
+    : null;
 
   return (
     <section
@@ -486,9 +1006,9 @@ export function TaskListPanel({
                     type="text"
                     value={newTaskName}
                     onChange={(event) => setNewTaskName(event.target.value)}
-                    placeholder="Task name"
-                    aria-label="Task name"
-                    className="h-[35px] w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 max-w-[230px] outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-zinc-500"
+                    placeholder={`+ Add Task to - ${title}`}
+                    aria-label={`+ Add Task to - ${title}`}
+                    className="h-[35px] w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 max-w-[190px] outline-none focus:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-zinc-500"
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
                         event.preventDefault();
@@ -497,9 +1017,16 @@ export function TaskListPanel({
                       }
                     }}
                     onBlur={() => {
-                      if (!newTaskName.trim()) {
-                        setIsAddingTask(false);
-                      }
+                      window.setTimeout(() => {
+                        if (keepAddTaskOpenRef.current) return;
+                        if (document.activeElement === newTaskInputRef.current) {
+                          return;
+                        }
+
+                        if (!newTaskName.trim()) {
+                          setIsAddingTask(false);
+                        }
+                      }, 0);
                     }}
                   />
                 </form>
@@ -550,289 +1077,52 @@ export function TaskListPanel({
             </div>
           </div>
 
-          <ul ref={listRef} className="relative flex flex-col">
-            {dropIndicator && (
+          {showAddTask && pinnedTasks.length > 0 && (
+            <div className="border-b border-zinc-200 bg-zinc-50/80 dark:border-zinc-700 dark:bg-zinc-900/40">
+              <p className="px-4 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Pinned
+              </p>
+              <ul ref={pinnedListRef} className="relative flex flex-col">
+                {dropIndicator?.section === "pinned" && (
+                  <div
+                    className="pointer-events-none absolute right-4 left-4 z-20 h-0.5 bg-blue-500"
+                    style={{ top: dropIndicator.top }}
+                  />
+                )}
+                {renderTaskItems(pinnedTasks, "pinned")}
+              </ul>
+            </div>
+          )}
+
+          <ul
+            ref={listRef}
+            className={`relative flex flex-col ${
+              showAddTask && pinnedTasks.length > 0
+                ? "border-t border-zinc-200 dark:border-zinc-700"
+                : ""
+            }`}
+          >
+            {dropIndicator?.section === "unpinned" && (
               <div
                 className="pointer-events-none absolute right-4 left-4 z-20 h-0.5 bg-blue-500"
                 style={{ top: dropIndicator.top }}
               />
             )}
 
-            {orderedTasks.length === 0 ? (
+            {listTasks.length === 0 && pinnedTasks.length === 0 ? (
               <li className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">
                 {title === "Today"
                   ? "No tasks for today"
-                  : title === "Calendar"
-                    ? "No scheduled tasks"
-                    : "No tasks"}
+                  : title === "Next 7 days"
+                    ? "No tasks in the next 7 days"
+                    : title === "Calendar"
+                      ? "No scheduled tasks"
+                      : isTagFilter
+                        ? "No tasks with this tag"
+                        : "No tasks"}
               </li>
             ) : (
-              orderedTasks.map((task) => {
-                const dueDateLabel = formatTaskDueDateLabel(task.dueDate);
-                const isRowMenuOpen =
-                  openDatePickerTaskId === task.id ||
-                  openMenuTaskId === task.id ||
-                  openPriorityMenuTaskId === task.id;
-
-                return (
-                  <li
-                    key={task.id}
-                    data-task-id={task.id}
-                    onClick={() =>onSelectTask(task.id)}
-                    className={`group flex min-h-[35px] items-center gap-2 border-b border-zinc-100 px-2 py-1 dark:border-zinc-900 cursor-pointer! ${
-                      task.id === selectedTaskId
-                        ? "bg-zinc-100 dark:bg-zinc-900"
-                        : ""
-                    }`}
-                  >
-                    {canReorder ? (
-                      <button
-                        type="button"
-                        aria-label="Drag task"
-                        title="Drag to reorder task"
-                        className="pointer-events-none flex size-[19px] shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-zinc-500 opacity-0 transition-opacity hover:border-zinc-300 hover:text-zinc-700 active:cursor-grabbing group-hover:pointer-events-auto group-hover:opacity-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                        onPointerDown={(event) =>
-                          handleTaskDragStart(event, task.id)
-                        }
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <InteractIcon className="size-3.5 text-[#949494]" />
-                      </button>
-                    ) : null}
-
-                    <input
-                      type="checkbox"
-                      checked={task.completed}
-                      onChange={() => onToggleTask(task.id)}
-                      onClick={(event) => event.stopPropagation()}
-                      className="size-4 shrink-0 accent-zinc-900 dark:accent-zinc-50"
-                    />
-
-                    {editingTaskId === task.id ? (
-                      <input
-                        ref={titleInputRef}
-                        type="text"
-                        value={titleDraft}
-                        onChange={(event) => setTitleDraft(event.target.value)}
-                        onBlur={() => {
-                          if (!titleEditReadyRef.current) return;
-                          commitTitleEdit(task);
-                        }}
-                        onKeyDown={(event) => handleTitleKeyDown(event, task)}
-                        className="min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-                      />
-                    ) : (
-                      <div className="min-w-0 flex-1">
-                        <button
-                          type="button"
-                          onClick={() => onSelectTask(task.id)}
-                          onDoubleClick={(event) => {
-                            event.preventDefault();
-                            startTitleEdit(task);
-                          }}
-                          className="block w-full truncate text-left text-sm text-zinc-900 dark:text-zinc-50"
-                        >
-                          {task.name}
-                        </button>
-                        {task.listName && (
-                          <span className="block truncate text-xs text-zinc-400 dark:text-zinc-500">
-                            {task.listName}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    <div className="relative flex h-7 shrink-0 items-center justify-end">
-                      {dueDateLabel ? (
-                        <span
-                          className={`text-xs text-zinc-400 transition-opacity dark:text-zinc-500 ${
-                            isRowMenuOpen
-                              ? "opacity-0"
-                              : "group-hover:opacity-0"
-                          }`}
-                        >
-                          {dueDateLabel}
-                        </span>
-                      ) : null}
-
-                      <div
-                        className={`flex items-center gap-0.5 transition-opacity ${
-                          dueDateLabel ? "absolute right-0" : ""
-                        } ${
-                          isRowMenuOpen
-                            ? "pointer-events-auto opacity-100"
-                            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
-                        }`}
-                      >
-                      {onSetTaskDueDate ? (
-                        <div
-                          className="relative"
-                          ref={
-                            openDatePickerTaskId === task.id
-                              ? taskDateMenuRef
-                              : null
-                          }
-                        >
-                          <button
-                            type="button"
-                            aria-label={
-                              dueDateLabel
-                                ? `Due ${dueDateLabel}. Change date`
-                                : "Set task date"
-                            }
-                            aria-haspopup="dialog"
-                            aria-expanded={openDatePickerTaskId === task.id}
-                            title={
-                              dueDateLabel ? `Due: ${dueDateLabel}` : "Set date"
-                            }
-                            className={`flex w-[20px] h-[24px] items-center justify-center rounded-md text-zinc-400 transition-colors cursor-pointer hover:bg-zinc-200/80 hover:text-zinc-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 ${
-                              task.dueDate
-                                ? "text-zinc-400 dark:text-zinc-300"
-                                : ""
-                            }`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              toggleDatePicker(task.id);
-                            }}
-                          >
-                            <BiCalendar className="size-4" />
-                          </button>
-
-                          {openDatePickerTaskId === task.id && (
-                            <div className="absolute right-0 top-full z-30 mt-1">
-                              <TaskDatePicker
-                                dueDate={task.dueDate}
-                                dueTimeMinutes={task.dueTimeMinutes}
-                                dueDurationMinutes={task.dueDurationMinutes}
-                                dueTimeZone={task.dueTimeZone}
-                                onSelectDate={(dateValue) =>
-                                  handleSelectTaskDueDate(task.id, dateValue)
-                                }
-                                onSaveDueTime={(dueTime) =>
-                                  handleSaveTaskDueTime(task.id, dueTime)
-                                }
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ) : null}
-
-                      <div
-                        className="relative"
-                        ref={
-                          openMenuTaskId === task.id ||
-                          openPriorityMenuTaskId === task.id
-                            ? taskContextMenuRef
-                            : null
-                        }
-                      >
-                        <button
-                          type="button"
-                          aria-label={`Open menu for ${task.name}`}
-                          aria-haspopup="menu"
-                          aria-expanded={
-                            openMenuTaskId === task.id ||
-                            openPriorityMenuTaskId === task.id
-                          }
-                          title="More options"
-                          className="flex w-[20px] h-[24px] items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-200/80 hover:text-zinc-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toggleTaskMenu(task.id);
-                          }}
-                        >
-                          <ThreeDotsIcon className="size-4" />
-                        </button>
-
-                        {openMenuTaskId === task.id && (
-                          <div
-                            role="menu"
-                            className="absolute right-0 top-full z-30 mt-1 w-36 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-                          >
-                            <button
-                              type="button"
-                              role="menuitem"
-                              className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setOpenMenuTaskId(null);
-                                startTitleEdit(task);
-                              }}
-                            >
-                              Rename
-                            </button>
-                            {onSetTaskPriority ? (
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  openPriorityMenu(task.id);
-                                }}
-                              >
-                                Add priority
-                              </button>
-                            ) : null}
-                            {task.dueDate && onSetTaskDueDate ? (
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleClearTaskDueDate(task.id);
-                                }}
-                              >
-                                Clear date
-                              </button>
-                            ) : null}
-                          </div>
-                        )}
-
-                        {openPriorityMenuTaskId === task.id && (
-                          <div
-                            role="menu"
-                            className="absolute right-0 top-full z-30 mt-1 w-36 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-                          >
-                            {[1, 2, 3, 4].map((priority) => (
-                              <button
-                                key={priority}
-                                type="button"
-                                role="menuitem"
-                                className={`flex h-[35px] w-full items-center px-3 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                                  task.priority === priority
-                                    ? "font-medium text-zinc-900 dark:text-zinc-50"
-                                    : "text-zinc-900 dark:text-zinc-50"
-                                }`}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleSelectTaskPriority(task.id, priority);
-                                }}
-                              >
-                                Priority {priority}
-                              </button>
-                            ))}
-                            {task.priority ? (
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-900 hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  handleClearTaskPriority(task.id);
-                                }}
-                              >
-                                Clear priority
-                              </button>
-                            ) : null}
-                          </div>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })
+              renderTaskItems(listTasks, "unpinned")
             )}
           </ul>
         </div>
@@ -843,6 +1133,56 @@ export function TaskListPanel({
           </p>
         </div>
       )}
+
+      {pointerContextMenu && pointerMenuTask ? (
+        <div ref={pointerContextMenuRef}>
+          <TaskRowContextMenu
+            task={pointerMenuTask}
+            view={pointerContextMenu.view}
+            lists={lists}
+            currentListId={resolveTaskListId(pointerMenuTask)}
+            moveQuery={moveQuery}
+            availableTags={availableTags}
+            assignedTagIds={assignedTagIds}
+            tagQuery={tagQuery}
+            isTagSubmitting={isTagSubmitting}
+            fixedPosition={{
+              x: pointerContextMenu.x,
+              y: pointerContextMenu.y,
+            }}
+            onMoveQueryChange={setMoveQuery}
+            onTagQueryChange={setTagQuery}
+            onToggleTagSelection={(tagId) =>
+              handleToggleTag(pointerMenuTask.id, tagId)
+            }
+            onCreateTag={(label) => handleCreateTag(pointerMenuTask.id, label)}
+            onClose={closeTaskMenus}
+            onStartTitleEdit={() => startTitleEdit(pointerMenuTask)}
+            onToggleTaskPinned={() => handleToggleTaskPinned(pointerMenuTask)}
+            onOpenPriorityMenu={() => openPriorityMenu(pointerMenuTask.id)}
+            onOpenTagMenu={() => openTagMenu(pointerMenuTask.id)}
+            onOpenMoveMenu={() => openMoveMenu(pointerMenuTask.id)}
+            onMoveTaskToList={(targetListId) =>
+              handleMoveTaskToList(pointerMenuTask.id, targetListId)
+            }
+            onClearTaskDueDate={() =>
+              handleClearTaskDueDate(pointerMenuTask.id)
+            }
+            onSelectTaskPriority={(priority) =>
+              handleSelectTaskPriority(pointerMenuTask.id, priority)
+            }
+            onClearTaskPriority={() =>
+              handleClearTaskPriority(pointerMenuTask.id)
+            }
+            onConfirmTags={handleConfirmTags}
+            hasDueDateActions={Boolean(onSetTaskDueDate)}
+            hasPriorityActions={Boolean(onSetTaskPriority)}
+            hasPinActions={Boolean(onSetTaskPinned)}
+            hasTagActions={Boolean(onToggleTaskLabelTag)}
+            hasMoveActions={Boolean(onMoveTaskToList) && lists.length > 1}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }

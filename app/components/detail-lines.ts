@@ -231,6 +231,14 @@ export function getLineIndex(editor: HTMLElement, line: HTMLElement) {
   return getLineElements(editor).indexOf(line);
 }
 
+export function isTitleLine(
+  editor: HTMLElement,
+  line: HTMLElement | null | undefined,
+) {
+  if (!line || !editor.contains(line)) return false;
+  return getLineIndex(editor, line) === 0;
+}
+
 function getNumberForLine(lines: HTMLElement[], lineIndex: number) {
   if (
     lineIndex > 0 &&
@@ -773,6 +781,64 @@ export function placeCaretInLine(line: HTMLElement) {
 
   selection.removeAllRanges();
   selection.addRange(range);
+}
+
+export function placeCaretAtEndOfLine(line: HTMLElement) {
+  const selection = window.getSelection();
+  if (!selection) return;
+
+  if (isLineEmpty(line) && !line.querySelector("br")) {
+    line.innerHTML = "<br>";
+  }
+
+  const range = document.createRange();
+  const br = line.querySelector("br");
+
+  if (isLineEmpty(line) && br) {
+    range.setStartBefore(br);
+    range.collapse(true);
+  } else {
+    range.selectNodeContents(line);
+    range.collapse(false);
+  }
+
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+export function focusNoteAtEnd(editor: HTMLElement) {
+  ensureBlockLines(editor);
+  ensureTitleLine(editor);
+
+  const lines = getLineElements(editor);
+  const noteLines = lines.slice(1);
+  if (noteLines.length === 0) return;
+
+  let targetLine = noteLines[noteLines.length - 1];
+
+  for (let index = noteLines.length - 1; index >= 0; index -= 1) {
+    const line = noteLines[index];
+    if (
+      !isDetailLineEmpty(line) ||
+      line.querySelector(".detail-image-wrapper") !== null
+    ) {
+      targetLine = line;
+      break;
+    }
+  }
+
+  editor.focus();
+
+  const imageWrapper = targetLine.querySelector(
+    ".detail-image-wrapper:last-of-type",
+  ) as HTMLElement | null;
+
+  if (imageWrapper && isDetailLineEmpty(targetLine)) {
+    placeCaretBelowWrapper(imageWrapper);
+    return;
+  }
+
+  placeCaretAtEndOfLine(targetLine);
 }
 
 export function focusDetailLine(editor: HTMLElement, line: HTMLElement) {
