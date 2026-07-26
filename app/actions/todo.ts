@@ -361,11 +361,11 @@ export async function updateTaskPinned(taskId: string, pinned: boolean) {
   return task;
 }
 
-export async function updateTaskBookmarked(taskId: string, bookmarked: boolean) {
+export async function updateTaskImportant(taskId: string, important: boolean) {
   const task = await prisma.task.update({
     where: { id: taskId },
-    data: { bookmarked },
-    select: { id: true, bookmarked: true },
+    data: { important },
+    select: { id: true, important: true },
   });
 
   revalidatePath("/");
@@ -481,7 +481,7 @@ export async function createTask(
         listId,
         name,
         position: 0,
-        bookmarked: false,
+        important: false,
         dueDate: dueDate ? new Date(`${dueDate}T12:00:00`) : null,
       },
     });

@@ -5,10 +5,10 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-const PRISMA_CLIENT_VERSION = "task-bookmarked-v2";
+const PRISMA_CLIENT_VERSION = "task-important-v1";
 
 function assertGeneratedClientSupportsSchema() {
-  if (!("bookmarked" in Prisma.TaskScalarFieldEnum)) {
+  if (!("important" in Prisma.TaskScalarFieldEnum)) {
     throw new Error(
       "Prisma client is out of date. Run: npx prisma generate",
     );

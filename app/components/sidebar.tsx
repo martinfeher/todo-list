@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { IoIosSearch } from "react-icons/io";
 import { IoPricetagsOutline } from "react-icons/io5";
-import { LuBookmark, LuPlus } from "react-icons/lu";
+import { LuPlus, LuStar } from "react-icons/lu";
 // import { BsCalendar2 } from "react-icons/bs";
 import { BsCalendar3 } from "react-icons/bs";
 
@@ -31,7 +31,7 @@ const NAV_ITEMS = [
   { label: "Search", action: "search" as const },
   { label: "Today", action: "today" as const },
   // { label: "Next 7 days", action: "next7days" as const },
-  { label: "Bookmarks", action: "bookmarked" as const },
+  { label: "Important", action: "important" as const },
   { label: "Calendar", action: "calendar" as const },
 ];
 
@@ -45,14 +45,14 @@ type SidebarProps = {
   selectedLabelId: string | null;
   isTodaySelected: boolean;
   // isNext7DaysSelected: boolean;
-  isBookmarkedSelected: boolean;
+  isImportantSelected: boolean;
   isCalendarSelected: boolean;
   selectedTaskId: string | null;
   onSelectList: (listId: string) => void;
   onSelectLabel: (labelId: string) => void;
   onSelectToday: () => void;
   // onSelectNext7Days: () => void;
-  onSelectBookmarked: () => void;
+  onSelectImportant: () => void;
   onSelectCalendar: () => void;
   onSelectCompletedTask: (taskId: string, listId: string) => void;
   onSelectSearchTask: (taskId: string, listId: string) => void;
@@ -100,14 +100,14 @@ export function Sidebar({
   selectedLabelId,
   isTodaySelected,
   // isNext7DaysSelected,
-  isBookmarkedSelected,
+  isImportantSelected,
   isCalendarSelected,
   selectedTaskId,
   onSelectList,
   onSelectLabel,
   onSelectToday,
   // onSelectNext7Days,
-  onSelectBookmarked,
+  onSelectImportant,
   onSelectCalendar,
   onSelectCompletedTask,
   onSelectSearchTask,
@@ -411,7 +411,7 @@ export function Sidebar({
             const isNavItemSelected =
               (item.action === "today" && isTodaySelected) ||
               // (item.action === "next7days" && isNext7DaysSelected) ||
-              (item.action === "bookmarked" && isBookmarkedSelected) ||
+              (item.action === "important" && isImportantSelected) ||
               (item.action === "calendar" && isCalendarSelected);
             const navIconColor = isNavItemSelected
               ? "text-[#111111]"
@@ -426,8 +426,8 @@ export function Sidebar({
                   ? onSelectToday
                   // : item.action === "next7days"
                   //   ? onSelectNext7Days
-                  : item.action === "bookmarked"
-                    ? onSelectBookmarked
+                  : item.action === "important"
+                    ? onSelectImportant
                     : item.action === "calendar"
                       ? onSelectCalendar
                       : item.action === "search"
@@ -459,8 +459,8 @@ export function Sidebar({
                   aria-hidden="true"
                 />
               ) : null} */}
-              {item.action === "bookmarked" ? (
-                <LuBookmark
+              {item.action === "important" ? (
+                <LuStar
                   className={`size-[15px] shrink-0 ${navIconColor}`}
                   aria-hidden="true"
                 />
@@ -507,7 +507,7 @@ export function Sidebar({
               className={`group relative flex h-[35px] items-center touch-none rounded-[3px] cursor-pointer ${
                 !isTodaySelected &&
                 // !isNext7DaysSelected &&
-                !isBookmarkedSelected &&
+                !isImportantSelected &&
                 !isCalendarSelected &&
                 !selectedLabelId &&
                 list.id === selectedListId
@@ -629,41 +629,43 @@ export function Sidebar({
             </div>
           ) : null}
 
-          <button
-            type="button"
-            className={`${getItemClassName(isCompletedOpen)} px-4`}
-            onClick={() => setIsCompletedOpen((open) => !open)}
-          >
-            Completed
-          </button>
+          <div className="mt-3 flex flex-col border-t border-zinc-150">
+            <button
+              type="button"
+              className={`${getItemClassName(isCompletedOpen)} px-4`}
+              onClick={() => setIsCompletedOpen((open) => !open)}
+            >
+              Completed
+            </button>
 
-          {isCompletedOpen &&
-            (completedTasks.length === 0 ? (
-              <p className="px-4 pb-3 text-xs text-zinc-400 dark:text-zinc-500">
-                No completed tasks
-              </p>
-            ) : (
-              <div className="max-h-[280px] overflow-y-auto">
-                {completedTasks.map((task) => (
-                  <button
-                    key={task.id}
-                    type="button"
-                    className={getItemClassName(
-                      task.id === selectedTaskId,
-                      completedItemClassName,
-                    )}
-                    onClick={() => onSelectCompletedTask(task.id, task.listId)}
-                  >
-                    <span className="w-full truncate text-zinc-400 line-through dark:text-zinc-500">
-                      {task.name}
-                    </span>
-                    <span className="w-full truncate text-xs text-zinc-400 dark:text-zinc-500">
-                      {task.listName}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ))}
+            {isCompletedOpen &&
+              (completedTasks.length === 0 ? (
+                <p className="px-4 pb-3 text-xs text-zinc-400 dark:text-zinc-500">
+                  No completed tasks
+                </p>
+              ) : (
+                <div className="max-h-[280px] overflow-y-auto">
+                  {completedTasks.map((task) => (
+                    <button
+                      key={task.id}
+                      type="button"
+                      className={getItemClassName(
+                        task.id === selectedTaskId,
+                        completedItemClassName,
+                      )}
+                      onClick={() => onSelectCompletedTask(task.id, task.listId)}
+                    >
+                      <span className="w-full truncate text-zinc-400 line-through dark:text-zinc-500">
+                        {task.name}
+                      </span>
+                      <span className="w-full truncate text-xs text-zinc-400 dark:text-zinc-500">
+                        {task.listName}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+          </div>
         </nav>
       </aside>
 

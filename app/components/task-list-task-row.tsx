@@ -65,7 +65,7 @@ type TaskListTaskRowProps = {
   onToggleTaskMenu: (taskId: string) => void;
   onStartTitleEdit: (task: TaskListItem) => void;
   onToggleTaskPinned: (task: TaskListItem) => void;
-  onToggleTaskBookmarked: (task: TaskListItem) => void;
+  onToggleTaskImportant: (task: TaskListItem) => void;
   onOpenLabelMenu: (taskId: string) => void;
   onOpenMoveMenu: (taskId: string) => void;
   onMoveQueryChange: (value: string) => void;
@@ -81,7 +81,7 @@ type TaskListTaskRowProps = {
   hasDueDateActions: boolean;
   hasPriorityActions: boolean;
   hasPinActions: boolean;
-  hasBookmarkActions: boolean;
+  hasImportantActions: boolean;
   hasLabelActions: boolean;
   hasMoveActions: boolean;
   useWiderRowPadding?: boolean;
@@ -137,7 +137,7 @@ export function TaskListTaskRow({
   onToggleTaskMenu,
   onStartTitleEdit,
   onToggleTaskPinned,
-  onToggleTaskBookmarked,
+  onToggleTaskImportant,
   onOpenLabelMenu,
   onOpenMoveMenu,
   onMoveQueryChange,
@@ -153,7 +153,7 @@ export function TaskListTaskRow({
   hasDueDateActions,
   hasPriorityActions,
   hasPinActions,
-  hasBookmarkActions,
+  hasImportantActions,
   hasLabelActions,
   hasMoveActions,
   useWiderRowPadding = false,
@@ -238,7 +238,7 @@ export function TaskListTaskRow({
           onClick={(event) => event.stopPropagation()}
           onBlur={() => onCommitTitleEdit(task)}
           onKeyDown={(event) => onTitleKeyDown(event, task)}
-          className="min-w-0 flex-1 bg-transparent text-sm text-zinc-900 outline-none dark:text-zinc-50"
+          className="min-w-0 flex-1 ml-2 bg-transparent text-sm text-zinc-900 outline-none dark:text-zinc-50"
         />
       ) : (
         <div className="min-w-0 flex-1 ml-2">
@@ -365,7 +365,7 @@ export function TaskListTaskRow({
                   onClose={onCloseTaskMenu}
                   onStartTitleEdit={() => onStartTitleEdit(task)}
                   onToggleTaskPinned={() => onToggleTaskPinned(task)}
-                  onToggleTaskBookmarked={() => onToggleTaskBookmarked(task)}
+                  onToggleTaskImportant={() => onToggleTaskImportant(task)}
                   onOpenLabelMenu={() => onOpenLabelMenu(task.id)}
                   onOpenMoveMenu={() => onOpenMoveMenu(task.id)}
                   onMoveTaskToList={(targetListId) =>
@@ -380,7 +380,7 @@ export function TaskListTaskRow({
                   hasDueDateActions={hasDueDateActions}
                   hasPriorityActions={hasPriorityActions}
                   hasPinActions={hasPinActions}
-                  hasBookmarkActions={hasBookmarkActions}
+                  hasImportantActions={hasImportantActions}
                   hasLabelActions={hasLabelActions}
                   hasMoveActions={hasMoveActions}
                 />

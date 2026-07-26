@@ -17,7 +17,7 @@ import {
   updateTaskDueTime as updateTaskDueTimeInDb,
   updateTaskPriority as updateTaskPriorityInDb,
   updateTaskPinned as updateTaskPinnedInDb,
-  updateTaskBookmarked as updateTaskBookmarkedInDb,
+  updateTaskImportant as updateTaskImportantInDb,
 } from "@/app/actions/todo";
 import type { TaskDueTime } from "@/lib/task-due-time";
 import { taskDetailsHasContent } from "@/lib/task-details-content";
@@ -46,7 +46,7 @@ export type Task = {
   dueTimeZone: string;
   priority: number | null;
   pinned: boolean;
-  bookmarked: boolean;
+  important: boolean;
   parentId: string | null;
   labels: TaskLabel[];
 };
@@ -86,7 +86,7 @@ function withPinnedDefaults(tasksByList: Record<string, Task[]>) {
         ...task,
         hasDetails: task.hasDetails ?? false,
         pinned: Boolean(task.pinned),
-        bookmarked: Boolean(task.bookmarked),
+        important: Boolean(task.important),
         parentId: task.parentId ?? null,
         labels: task.labels ?? [],
       })),
@@ -166,7 +166,7 @@ function getTasksByLabel(
 type ActiveView =
   | "today"
   // | "next7days"
-  | "bookmarked"
+  | "important"
   | "calendar"
   | null;
 
@@ -213,10 +213,10 @@ function getVisibleTasks(
   }
   */
 
-  if (activeView === "bookmarked") {
+  if (activeView === "important") {
     return lists.flatMap((list) =>
       (tasksByList[list.id] ?? [])
-        .filter((task) => !task.completed && task.bookmarked)
+        .filter((task) => !task.completed && task.important)
         .map((task) => ({
           ...task,
           listId: list.id,
@@ -325,8 +325,8 @@ export function TodoApp({
         ? "Today"
         // : activeView === "next7days"
         //   ? "Next 7 days"
-        : activeView === "bookmarked"
-          ? "Bookmarks"
+        : activeView === "important"
+          ? "Important"
           : activeView === "calendar"
             ? "Calendar"
             : (selectedList?.name ?? null);
@@ -494,12 +494,12 @@ export function TodoApp({
   }
   */
 
-  function selectBookmarked() {
-    setActiveView("bookmarked");
+  function selectImportant() {
+    setActiveView("important");
     setSelectedLabelId(null);
     setSelectedListId(null);
     setSelectedTaskId(
-      getFirstVisibleTaskId("bookmarked", null, null, lists, tasksByList),
+      getFirstVisibleTaskId("important", null, null, lists, tasksByList),
     );
   }
 
@@ -605,7 +605,7 @@ export function TodoApp({
       dueTimeZone: "floating",
       priority: null,
       pinned: false,
-      bookmarked: false,
+      important: false,
       parentId: null,
       labels: [],
     };
@@ -827,14 +827,14 @@ export function TodoApp({
     });
   }, []);
 
-  const handleBookmarkedUpdated = useCallback(
-    (taskId: string, bookmarked: boolean) => {
+  const handleImportantUpdated = useCallback(
+    (taskId: string, important: boolean) => {
       setTasksByList((current) => {
         const next = { ...current };
 
         for (const listId of Object.keys(next)) {
           next[listId] = next[listId].map((task) =>
-            task.id === taskId ? { ...task, bookmarked } : task,
+            task.id === taskId ? { ...task, important } : task,
           );
         }
 
@@ -927,13 +927,13 @@ export function TodoApp({
     }
   }
 
-  async function setTaskBookmarked(taskId: string, bookmarked: boolean) {
-    handleBookmarkedUpdated(taskId, bookmarked);
+  async function setTaskImportant(taskId: string, important: boolean) {
+    handleImportantUpdated(taskId, important);
 
     try {
-      await updateTaskBookmarkedInDb(taskId, bookmarked);
+      await updateTaskImportantInDb(taskId, important);
     } catch {
-      handleBookmarkedUpdated(taskId, !bookmarked);
+      handleImportantUpdated(taskId, !important);
     }
   }
 
@@ -1147,14 +1147,14 @@ export function TodoApp({
           selectedLabelId={selectedLabelId}
           isTodaySelected={activeView === "today"}
           // isNext7DaysSelected={activeView === "next7days"}
-          isBookmarkedSelected={activeView === "bookmarked"}
+          isImportantSelected={activeView === "important"}
           isCalendarSelected={activeView === "calendar"}
           selectedTaskId={selectedTaskId}
           onSelectList={selectList}
           onSelectLabel={selectLabel}
           onSelectToday={selectToday}
           // onSelectNext7Days={selectNext7Days}
-          onSelectBookmarked={selectBookmarked}
+          onSelectImportant={selectImportant}
           onSelectCalendar={selectCalendar}
           onSelectCompletedTask={selectCompletedTask}
           onSelectSearchTask={selectSearchTask}
@@ -1205,7 +1205,7 @@ export function TodoApp({
               onSetTaskDueTime={setTaskDueTime}
               onSetTaskPriority={setTaskPriority}
               onSetTaskPinned={setTaskPinned}
-              onSetTaskBookmarked={setTaskBookmarked}
+              onSetTaskImportant={setTaskImportant}
               onToggleTaskLabel={toggleTaskLabel}
               onLabelsChanged={refreshLabels}
               onMoveTaskToList={moveTaskToList}

@@ -67,6 +67,15 @@ const SORT_OPTIONS: SortOption[] = [
   { field: "title", direction: "desc", label: "Title (Z-A)" },
 ];
 
+function formatActiveSortLabel(label: string) {
+  return label
+    .replace("ascending", "asc")
+    .replace("descending", "desc")
+    .replace(/[()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const ROW_DRAG_THRESHOLD_PX = 5;
 
 function shouldStartRowDrag(target: EventTarget | null) {
@@ -188,7 +197,7 @@ type TaskListPanelProps = {
   onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
   onSetTaskPriority?: (taskId: string, priority: number | null) => void;
   onSetTaskPinned?: (taskId: string, pinned: boolean) => void;
-  onSetTaskBookmarked?: (taskId: string, bookmarked: boolean) => void;
+  onSetTaskImportant?: (taskId: string, important: boolean) => void;
   onToggleTaskLabel?: (
     taskId: string,
     labelId: string,
@@ -230,7 +239,7 @@ export function TaskListPanel({
   onSetTaskDueTime,
   onSetTaskPriority,
   onSetTaskPinned,
-  onSetTaskBookmarked,
+  onSetTaskImportant,
   onToggleTaskLabel,
   onLabelsChanged,
   onMoveTaskToList,
@@ -247,6 +256,7 @@ export function TaskListPanel({
   const [titleDraft, setTitleDraft] = useState("");
   const [orderedTasks, setOrderedTasks] = useState(tasks);
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+  const [activeSort, setActiveSort] = useState<SortOption | null>(null);
   const [openDatePickerTaskId, setOpenDatePickerTaskId] = useState<string | null>(
     null,
   );
@@ -352,6 +362,11 @@ export function TaskListPanel({
     [orderedTasks],
   );
 
+  const hasScheduledTasks = useMemo(
+    () => orderedTasks.some((task) => task.dueDate),
+    [orderedTasks],
+  );
+
   useEffect(() => {
     setOrderedTasks(tasks);
   }, [tasks]);
@@ -378,6 +393,7 @@ export function TaskListPanel({
     setPointerContextMenu(null);
     setIsAddingTask(false);
     setNewTaskName("");
+    setActiveSort(null);
   }, [title]);
 
   useEffect(() => {
@@ -505,6 +521,7 @@ export function TaskListPanel({
     keepAddTaskOpenRef.current = true;
     onAddTask(newTaskName);
     setNewTaskName("");
+    setActiveSort(null);
 
     requestAnimationFrame(() => {
       newTaskInputRef.current?.focus();
@@ -612,6 +629,10 @@ export function TaskListPanel({
       );
     }
 
+    const sortOption = SORT_OPTIONS.find(
+      (option) => option.field === field && option.direction === direction,
+    );
+    setActiveSort(sortOption ?? null);
     setIsSortMenuOpen(false);
   }
 
@@ -781,8 +802,8 @@ export function TaskListPanel({
     closeTaskMenus();
   }
 
-  function handleToggleTaskBookmarked(task: TaskListItem) {
-    onSetTaskBookmarked?.(task.id, !task.bookmarked);
+  function handleToggleTaskImportant(task: TaskListItem) {
+    onSetTaskImportant?.(task.id, !task.important);
     closeTaskMenus();
   }
 
@@ -965,6 +986,7 @@ export function TaskListPanel({
       const parentChanged = parentUpdates.length > 0;
 
       if (orderChanged || parentChanged) {
+        setActiveSort(null);
         onReorderTasks(
           listId,
           nextIds,
@@ -1064,7 +1086,7 @@ export function TaskListPanel({
   ) {
     const hasLabelActions = Boolean(onToggleTaskLabel);
     const hasMoveActions = Boolean(onMoveTaskToList) && lists.length > 1;
-    const useWiderRowPadding = title === "Today" || title === "Bookmarks";
+    const useWiderRowPadding = title === "Today" || title === "Important";
 
     return taskItems.flatMap((task, index) => {
       const depth = task.depth ?? 0;
@@ -1131,7 +1153,7 @@ export function TaskListPanel({
           onToggleTaskMenu={toggleTaskMenu}
           onStartTitleEdit={startTitleEdit}
           onToggleTaskPinned={handleToggleTaskPinned}
-          onToggleTaskBookmarked={handleToggleTaskBookmarked}
+          onToggleTaskImportant={handleToggleTaskImportant}
           onOpenLabelMenu={openLabelMenu}
           onOpenMoveMenu={openMoveMenu}
           onMoveQueryChange={setMoveQuery}
@@ -1147,7 +1169,7 @@ export function TaskListPanel({
           hasDueDateActions={Boolean(onSetTaskDueDate)}
           hasPriorityActions={Boolean(onSetTaskPriority)}
           hasPinActions={Boolean(onSetTaskPinned)}
-          hasBookmarkActions={Boolean(onSetTaskBookmarked)}
+          hasImportantActions={Boolean(onSetTaskImportant)}
           hasLabelActions={hasLabelActions}
           hasMoveActions={hasMoveActions}
           useWiderRowPadding={useWiderRowPadding}
@@ -1194,7 +1216,7 @@ export function TaskListPanel({
             </header>
           )}
 
-          <div className="flex items-center justify-between gap-2 pl-[26px] pr-4 py-3">
+          <div className="flex items-center justify-between gap-2 pl-[26px] pr-1.5 py-3">
             {showAddTask ? (
               isAddingTask ? (
                 <form
@@ -1269,24 +1291,43 @@ export function TaskListPanel({
               <div className="flex-1" />
             )}
 
-            <div className="relative shrink-0" ref={sortMenuRef}>
+            <div
+              className="relative shrink-0"
+              ref={sortMenuRef}
+              onMouseEnter={() => setIsSortMenuOpen(true)}
+              onMouseLeave={() => setIsSortMenuOpen(false)}
+            >
               <button
                 type="button"
-                aria-label="Sort tasks"
+                aria-label={
+                  activeSort
+                    ? `Sort tasks. Currently sorted by ${activeSort.label}`
+                    : "Sort tasks"
+                }
                 aria-haspopup="menu"
                 aria-expanded={isSortMenuOpen}
-                onClick={() => setIsSortMenuOpen((open) => !open)}
-                className="flex size-[31px] items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:border-zinc-500 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                className="flex h-[31px] items-center gap-1 rounded-lg px-1 text-[14px] text-[#777777] transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 cursor-pointer"
               >
-                <BiSortAlt2 className="size-[18px]" style={{ color: "#777777" }} />
+                <BiSortAlt2 className="size-[15px] shrink-0" aria-hidden="true" />
+                {activeSort ? (
+                  <>
+                    Sort:{" "}
+                    <span className="text-[11px] font-medium">
+                      {formatActiveSortLabel(activeSort.label)}
+                    </span>
+                  </>
+                ) : (
+                  "Sort"
+                )}
               </button>
 
               {isSortMenuOpen && (
-                <div
-                  role="menu"
-                  className="absolute right-0 top-full z-20 mt-1 min-w-[180px] overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-                >
-                  {SORT_OPTIONS.map((option) => (
+                <div className="absolute left-0 top-full z-20 min-w-[180px] pt-1">
+                  <div
+                    role="menu"
+                    className="overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                  >
+                    {SORT_OPTIONS.map((option) => (
                       <button
                         key={`${option.field}-${option.direction}`}
                         type="button"
@@ -1297,6 +1338,7 @@ export function TaskListPanel({
                         {option.label}
                       </button>
                     ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1346,8 +1388,8 @@ export function TaskListPanel({
                   ? "No tasks for today"
                   // : title === "Next 7 days"
                   //   ? "No tasks in the next 7 days"
-                  : title === "Bookmarks"
-                    ? "No bookmarked tasks"
+                  : title === "Important"
+                    ? "No important tasks"
                     : title === "Calendar"
                       ? "No scheduled tasks"
                       : isLabelFilter
@@ -1362,7 +1404,7 @@ export function TaskListPanel({
             )}
           </ul>
 
-          {showListCalendarButton ? (
+          {showListCalendarButton && hasScheduledTasks ? (
             <div className="flex justify-end border-t border-zinc-200 px-4 py-2 dark:border-zinc-800">
               <button
                 ref={listCalendarButtonRef}
@@ -1413,8 +1455,8 @@ export function TaskListPanel({
             onClose={closeTaskMenus}
             onStartTitleEdit={() => startTitleEdit(pointerMenuTask)}
             onToggleTaskPinned={() => handleToggleTaskPinned(pointerMenuTask)}
-            onToggleTaskBookmarked={() =>
-              handleToggleTaskBookmarked(pointerMenuTask)
+            onToggleTaskImportant={() =>
+              handleToggleTaskImportant(pointerMenuTask)
             }
             onOpenLabelMenu={() => openLabelMenu(pointerMenuTask.id)}
             onOpenMoveMenu={() => openMoveMenu(pointerMenuTask.id)}
@@ -1434,7 +1476,7 @@ export function TaskListPanel({
             hasDueDateActions={Boolean(onSetTaskDueDate)}
             hasPriorityActions={Boolean(onSetTaskPriority)}
             hasPinActions={Boolean(onSetTaskPinned)}
-            hasBookmarkActions={Boolean(onSetTaskBookmarked)}
+            hasImportantActions={Boolean(onSetTaskImportant)}
             hasLabelActions={Boolean(onToggleTaskLabel)}
             hasMoveActions={Boolean(onMoveTaskToList) && lists.length > 1}
           />

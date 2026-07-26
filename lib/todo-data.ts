@@ -102,7 +102,7 @@ export async function getTodoData() {
           dueDurationMinutes: true,
           dueTimeZone: true,
           pinned: true,
-          bookmarked: true,
+          important: true,
           parentId: true,
           tags: {
             include: { tag: true },
@@ -134,7 +134,7 @@ export async function getTodoData() {
             dueTimeZone,
             tags,
             pinned,
-            bookmarked,
+            important,
             parentId,
           }) => ({
           id,
@@ -149,7 +149,7 @@ export async function getTodoData() {
           priority: getPriorityFromTaskTags(tags),
           labels: getLabelsFromTaskTags(tags),
           pinned: Boolean(pinned),
-          bookmarked: Boolean(bookmarked),
+          important: Boolean(important),
           parentId: parentId ?? null,
         }),
         ),

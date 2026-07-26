@@ -27,7 +27,7 @@ type TaskRowContextMenuProps = {
   onClose: () => void;
   onStartTitleEdit: () => void;
   onToggleTaskPinned: () => void;
-  onToggleTaskBookmarked: () => void;
+  onToggleTaskImportant: () => void;
   onOpenLabelMenu: () => void;
   onOpenMoveMenu: () => void;
   onMoveTaskToList: (listId: string) => void;
@@ -38,7 +38,7 @@ type TaskRowContextMenuProps = {
   hasDueDateActions: boolean;
   hasPriorityActions: boolean;
   hasPinActions: boolean;
-  hasBookmarkActions: boolean;
+  hasImportantActions: boolean;
   hasLabelActions: boolean;
   hasMoveActions: boolean;
 };
@@ -53,7 +53,7 @@ function MainMenuItems({
   task,
   view,
   hasPinActions,
-  hasBookmarkActions,
+  hasImportantActions,
   hasPriorityActions,
   hasDueDateActions,
   hasLabelActions,
@@ -61,7 +61,7 @@ function MainMenuItems({
   onClose,
   onStartTitleEdit,
   onToggleTaskPinned,
-  onToggleTaskBookmarked,
+  onToggleTaskImportant,
   onOpenLabelMenu,
   onOpenMoveMenu,
   onClearTaskDueDate,
@@ -72,7 +72,7 @@ function MainMenuItems({
   | "task"
   | "view"
   | "hasPinActions"
-  | "hasBookmarkActions"
+  | "hasImportantActions"
   | "hasPriorityActions"
   | "hasDueDateActions"
   | "hasLabelActions"
@@ -80,7 +80,7 @@ function MainMenuItems({
   | "onClose"
   | "onStartTitleEdit"
   | "onToggleTaskPinned"
-  | "onToggleTaskBookmarked"
+  | "onToggleTaskImportant"
   | "onOpenLabelMenu"
   | "onOpenMoveMenu"
   | "onClearTaskDueDate"
@@ -117,17 +117,17 @@ function MainMenuItems({
           {task.pinned ? "Unpin task" : "Pin task"}
         </button>
       ) : null}
-      {hasBookmarkActions ? (
+      {hasImportantActions ? (
         <button
           type="button"
           role="menuitem"
           className={menuItemClassName}
           onClick={(event) => {
             event.stopPropagation();
-            onToggleTaskBookmarked();
+            onToggleTaskImportant();
           }}
         >
-          {task.bookmarked ? "Remove bookmark" : "Bookmark task"}
+          {task.important ? "Remove from important" : "Mark as important"}
         </button>
       ) : null}
       {hasPriorityActions ? (
@@ -207,7 +207,7 @@ export function TaskRowContextMenu({
   onClose,
   onStartTitleEdit,
   onToggleTaskPinned,
-  onToggleTaskBookmarked,
+  onToggleTaskImportant,
   onOpenLabelMenu,
   onOpenMoveMenu,
   onMoveTaskToList,
@@ -218,7 +218,7 @@ export function TaskRowContextMenu({
   hasDueDateActions,
   hasPriorityActions,
   hasPinActions,
-  hasBookmarkActions,
+  hasImportantActions,
   hasLabelActions,
   hasMoveActions,
 }: TaskRowContextMenuProps) {
@@ -229,7 +229,7 @@ export function TaskRowContextMenu({
           task={task}
           view={view}
           hasPinActions={hasPinActions}
-          hasBookmarkActions={hasBookmarkActions}
+          hasImportantActions={hasImportantActions}
           hasPriorityActions={hasPriorityActions}
           hasDueDateActions={hasDueDateActions}
           hasLabelActions={hasLabelActions}
@@ -237,7 +237,7 @@ export function TaskRowContextMenu({
           onClose={onClose}
           onStartTitleEdit={onStartTitleEdit}
           onToggleTaskPinned={onToggleTaskPinned}
-          onToggleTaskBookmarked={onToggleTaskBookmarked}
+          onToggleTaskImportant={onToggleTaskImportant}
           onOpenLabelMenu={onOpenLabelMenu}
           onOpenMoveMenu={onOpenMoveMenu}
           onClearTaskDueDate={onClearTaskDueDate}
@@ -252,7 +252,7 @@ export function TaskRowContextMenu({
             task={task}
             view={view}
             hasPinActions={hasPinActions}
-            hasBookmarkActions={hasBookmarkActions}
+            hasImportantActions={hasImportantActions}
             hasPriorityActions={hasPriorityActions}
             hasDueDateActions={hasDueDateActions}
             hasLabelActions={hasLabelActions}
@@ -260,7 +260,7 @@ export function TaskRowContextMenu({
             onClose={onClose}
             onStartTitleEdit={onStartTitleEdit}
             onToggleTaskPinned={onToggleTaskPinned}
-            onToggleTaskBookmarked={onToggleTaskBookmarked}
+            onToggleTaskImportant={onToggleTaskImportant}
             onOpenLabelMenu={onOpenLabelMenu}
             onOpenMoveMenu={onOpenMoveMenu}
             onClearTaskDueDate={onClearTaskDueDate}
