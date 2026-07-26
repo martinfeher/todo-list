@@ -3,12 +3,15 @@
 import {
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { BiSearch } from "react-icons/bi";
+import { fetchTaskById } from "@/lib/task-details-api";
+import { taskDetailsHasContent } from "@/lib/task-details-content";
 import type { SearchTask } from "./todo-app";
 
 type SearchModalProps = {
@@ -20,6 +23,7 @@ type SearchModalProps = {
 };
 
 const SEARCH_RESULT_LIMIT = 50;
+const detailsCache = new Map<string, string>();
 
 type SearchScope = "all" | "names" | "content";
 
@@ -90,37 +94,6 @@ function filterTasks(
   return matches;
 }
 
-function getDetailsSnippet(
-  plainText: string,
-  query: string,
-  maxLength = 96,
-): string | null {
-  const trimmed = query.trim();
-  if (!trimmed || !plainText) return null;
-
-  const lowerText = plainText.toLowerCase();
-  const lowerQuery = trimmed.toLowerCase();
-  const matchIndex = lowerText.indexOf(lowerQuery);
-  if (matchIndex === -1) return null;
-
-  const matchLength = lowerQuery.length;
-  const remaining = maxLength - matchLength;
-  const beforeLength = Math.min(Math.floor(remaining / 2), matchIndex);
-  const afterLength = Math.min(
-    maxLength - beforeLength - matchLength,
-    plainText.length - matchIndex - matchLength,
-  );
-
-  const start = matchIndex - beforeLength;
-  const end = matchIndex + matchLength + afterLength;
-
-  let snippet = plainText.slice(start, end);
-  if (start > 0) snippet = `…${snippet}`;
-  if (end < plainText.length) snippet = `${snippet}…`;
-
-  return snippet;
-}
-
 function highlightSearchMatch(text: string, query: string): ReactNode {
   const trimmed = query.trim();
   if (!trimmed) return text;
@@ -151,6 +124,117 @@ function highlightSearchMatch(text: string, query: string): ReactNode {
   }
 
   return parts;
+}
+
+type SearchResultContentPreviewProps = {
+  taskId: string;
+  details: string;
+  hasDetails: boolean;
+};
+
+function SearchResultContentPreview({
+  taskId,
+  details,
+  hasDetails,
+}: SearchResultContentPreviewProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  const hasLoadedDetails = taskDetailsHasContent(details);
+  const [fetchedDetails, setFetchedDetails] = useState<string | null>(() => {
+    if (hasLoadedDetails) return null;
+    return detailsCache.get(taskId) ?? null;
+  });
+
+  useEffect(() => {
+    if (!hasDetails || hasLoadedDetails || fetchedDetails !== null) return;
+
+    let cancelled = false;
+
+    fetchTaskById(taskId)
+      .then((task) => {
+        if (cancelled) return;
+        const loaded = task?.details ?? "";
+        detailsCache.set(taskId, loaded);
+        setFetchedDetails(loaded);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId, hasDetails, hasLoadedDetails, fetchedDetails]);
+
+  const previewDetails = hasLoadedDetails
+    ? details
+    : (fetchedDetails ?? detailsCache.get(taskId) ?? "");
+  const hasContent = taskDetailsHasContent(previewDetails);
+
+  useLayoutEffect(() => {
+    if (!hasContent) return;
+
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
+
+    const updateScale = () => {
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      const contentWidth = content.scrollWidth;
+      const contentHeight = content.scrollHeight;
+
+      if (contentWidth <= 0 || contentHeight <= 0) return;
+
+      const nextScale = Math.min(
+        containerWidth / contentWidth,
+        containerHeight / contentHeight,
+        1,
+      );
+
+      setScale(nextScale);
+    };
+
+    updateScale();
+
+    const resizeObserver = new ResizeObserver(updateScale);
+    resizeObserver.observe(container);
+    resizeObserver.observe(content);
+
+    const images = content.querySelectorAll("img");
+    for (const image of images) {
+      if (!image.complete) {
+        image.addEventListener("load", updateScale);
+        image.addEventListener("error", updateScale);
+      }
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+      for (const image of images) {
+        image.removeEventListener("load", updateScale);
+        image.removeEventListener("error", updateScale);
+      }
+    };
+  }, [hasContent, previewDetails]);
+
+  if (!hasDetails && !hasContent) return null;
+  if (!hasContent) return null;
+
+  return (
+    <div
+      ref={containerRef}
+      aria-hidden="true"
+      className="relative w-[220px] shrink-0 self-stretch overflow-hidden border-l border-zinc-100 bg-white/70 py-1.5 pl-2 pr-1.5 dark:border-zinc-800 dark:bg-zinc-950/50"
+    >
+      <div
+        ref={contentRef}
+        className="search-result-content-preview task-details-editor absolute left-2 top-1.5 w-[280px] origin-top-left text-[13px] leading-[1.45]"
+        style={{ transform: `scale(${scale})` }}
+        dangerouslySetInnerHTML={{ __html: previewDetails }}
+      />
+    </div>
+  );
 }
 
 export function SearchModal({
@@ -333,17 +417,8 @@ export function SearchModal({
             <>
               <ul role="listbox" aria-activedescendant={activeIndex >= 0 ? `search-result-${results[activeIndex]?.id}` : undefined}>
                 {results.map((task, index) => {
-                  const highlightQueryLower = highlightQuery.toLowerCase();
-                  const contentMatches =
-                    highlightQueryLower.length > 0 &&
-                    task.normalizedDetails.includes(highlightQueryLower);
-                  const showDetailsSnippet =
-                    contentMatches &&
-                    (searchScope === "all" ||
-                      searchScope === "content");
-                  const detailsSnippet = showDetailsSnippet
-                    ? getDetailsSnippet(task.plainDetails, highlightQuery)
-                    : null;
+                  const showContentPreview =
+                    task.hasDetails || taskDetailsHasContent(task.details);
 
                   return (
                   <li
@@ -354,7 +429,7 @@ export function SearchModal({
                     }}
                     role="option"
                     aria-selected={index === activeIndex}
-                    className={`flex min-h-[44px] items-center gap-3 border-b border-zinc-100 px-4 py-2 dark:border-zinc-800 cursor-pointer ${
+                    className={`flex min-h-[44px] items-stretch gap-3 border-b border-zinc-100 px-4 dark:border-zinc-800 cursor-pointer ${
                       index === activeIndex
                         ? "bg-zinc-100 dark:bg-zinc-800"
                         : ""
@@ -365,12 +440,12 @@ export function SearchModal({
                       checked={task.completed}
                       onChange={() => onToggleTask(task.id)}
                       onClick={(event) => event.stopPropagation()}
-                      className="size-4 shrink-0 accent-zinc-900 dark:accent-zinc-50"
+                      className="my-auto size-4 shrink-0 accent-zinc-900 dark:accent-zinc-50"
                     />
                     <button
                       type="button"
                       onClick={() => selectTask(task)}
-                      className="min-w-0 flex-1 text-left"
+                      className="min-w-0 flex-1 py-2 text-left"
                     >
                       <span
                         className={`block truncate text-sm ${
@@ -384,12 +459,14 @@ export function SearchModal({
                       <span className="block truncate text-xs text-zinc-400 dark:text-zinc-500">
                         {task.listName}
                       </span>
-                      {detailsSnippet && (
-                        <span className="mt-0.5 block truncate text-xs text-zinc-500 dark:text-zinc-400">
-                          {highlightSearchMatch(detailsSnippet, highlightQuery)}
-                        </span>
-                      )}
                     </button>
+                    {showContentPreview ? (
+                      <SearchResultContentPreview
+                        taskId={task.id}
+                        details={task.details}
+                        hasDetails={task.hasDetails}
+                      />
+                    ) : null}
                   </li>
                   );
                 })}

@@ -1258,8 +1258,8 @@ export function TaskListPanel({
           </div>
 
           {showAddTask && pinnedVisibleTasks.length > 0 && (
-            <div className="border-b border-zinc-200 bg-zinc-50/80 dark:border-zinc-700 dark:bg-zinc-900/40">
-              <p className="px-4 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            <div className="mb-2 border-b border-zinc-200 bg-zinc-50/40 dark:border-zinc-700 dark:bg-zinc-900/40">
+              <p className="px-4 pb-1 pt-2.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 dark:text-zinc-400">
                 Pinned
               </p>
               <ul ref={pinnedListRef} className="relative flex flex-col">

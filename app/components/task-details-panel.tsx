@@ -409,6 +409,8 @@ export function TaskDetailsPanel({
   } | null>(null);
   const previousTextRef = useRef("");
   const saveTimerRef = useRef<number | null>(null);
+  const saveInFlightRef = useRef(false);
+  const saveQueuedRef = useRef(false);
   const historyTimerRef = useRef<number | null>(null);
   const historyRef = useRef<string[]>([]);
   const historyIndexRef = useRef(-1);
@@ -572,48 +574,88 @@ export function TaskDetailsPanel({
   }, [flushHistorySnapshot]);
 
   const saveDetails = useCallback(async () => {
-    const currentTaskId = taskIdRef.current;
-    if (!currentTaskId || !isReadyRef.current) return;
+    if (saveInFlightRef.current) {
+      saveQueuedRef.current = true;
+      return;
+    }
 
-    const editorHtml = editorRef.current?.innerHTML ?? detailsRef.current;
-    const { title, details } = splitEditorContent(editorHtml);
-    detailsRef.current = editorHtml;
-
-    let nextStatus: SaveStatus | null = null;
+    saveInFlightRef.current = true;
 
     try {
-      if (details !== savedDetailsRef.current) {
-        const detailsBytes = new TextEncoder().encode(details).byteLength;
-        if (detailsBytes > MAX_DETAILS_SAVE_BYTES) {
-          saveStatusRef.current = "error";
-          setSaveStatus("error");
-          return;
+      while (true) {
+        const currentTaskId = taskIdRef.current;
+        if (!currentTaskId || !isReadyRef.current) break;
+
+        const editorHtml = editorRef.current?.innerHTML ?? detailsRef.current;
+        const { title, details } = splitEditorContent(editorHtml);
+        detailsRef.current = editorHtml;
+
+        const detailsChanged = details !== savedDetailsRef.current;
+        const titleChanged = Boolean(title && title !== taskNameRef.current);
+
+        if (!detailsChanged && !titleChanged) break;
+
+        saveStatusRef.current = "pending";
+        setSaveStatus("pending");
+
+        let nextStatus: SaveStatus | null = null;
+
+        if (detailsChanged) {
+          const detailsBytes = new TextEncoder().encode(details).byteLength;
+          if (detailsBytes > MAX_DETAILS_SAVE_BYTES) {
+            saveStatusRef.current = "error";
+            setSaveStatus("error");
+            break;
+          }
+
+          await saveTaskDetails(currentTaskId, details);
+
+          if (taskIdRef.current !== currentTaskId) break;
+
+          savedDetailsRef.current = details;
+          onDetailsSaved(currentTaskId, details);
+          nextStatus = "saved";
         }
 
-        await saveTaskDetails(currentTaskId, details);
-        savedDetailsRef.current = details;
-        onDetailsSaved(currentTaskId, details);
-        nextStatus = "saved";
-      }
+        if (title && title !== taskNameRef.current) {
+          if (taskIdRef.current !== currentTaskId) break;
 
-      if (title && title !== taskNameRef.current) {
-        const updatedTask = await renameTask(currentTaskId, title);
-        taskNameRef.current = updatedTask.name;
-        syncedTitleRef.current = updatedTask.name;
-        setTask((current) =>
-          current ? { ...current, name: updatedTask.name } : current,
-        );
-        onTaskRenamed(currentTaskId, updatedTask.name);
-        nextStatus = "saved";
-      }
+          const updatedTask = await renameTask(currentTaskId, title);
 
-      if (nextStatus) {
-        saveStatusRef.current = nextStatus;
-        setSaveStatus(nextStatus);
+          if (taskIdRef.current !== currentTaskId) break;
+
+          taskNameRef.current = updatedTask.name;
+          syncedTitleRef.current = updatedTask.name;
+          setTask((current) =>
+            current ? { ...current, name: updatedTask.name } : current,
+          );
+          onTaskRenamed(currentTaskId, updatedTask.name);
+          nextStatus = "saved";
+        }
+
+        if (nextStatus) {
+          saveStatusRef.current = nextStatus;
+          setSaveStatus(nextStatus);
+        }
+
+        const latestHtml = editorRef.current?.innerHTML ?? detailsRef.current;
+        const latest = splitEditorContent(latestHtml);
+        const stillDirty =
+          latest.details !== savedDetailsRef.current ||
+          (Boolean(latest.title) && latest.title !== taskNameRef.current);
+
+        if (!stillDirty && !saveQueuedRef.current) break;
       }
     } catch {
       saveStatusRef.current = "error";
       setSaveStatus("error");
+    } finally {
+      saveInFlightRef.current = false;
+
+      if (saveQueuedRef.current) {
+        saveQueuedRef.current = false;
+        void saveDetails();
+      }
     }
   }, [onDetailsSaved, onTaskRenamed]);
 
@@ -1466,8 +1508,16 @@ export function TaskDetailsPanel({
 
     if (!editor || files.length === 0 || !currentTaskId) return;
 
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+
     try {
       const sources = await uploadImageFiles(currentTaskId, files);
+
+      if (taskIdRef.current !== currentTaskId || !editorRef.current) return;
+
       await insertImagesIntoEditor(editor, sources, referenceLine);
       syncEditorContent();
       recordHistorySnapshot();

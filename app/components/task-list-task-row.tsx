@@ -201,7 +201,7 @@ export function TaskListTaskRow({
         showDragHandle ? "touch-none" : ""
       } ${
         isSelected
-          ? "bg-[#e9ebee]/85 hover:bg-[#e9ebee]"
+          ? "bg-[#e9ebee]/90 hover:bg-[#e9ebee]"
           : "hover:bg-[#faf6ff]"
       }`}
       style={{ paddingLeft: rowPaddingLeft, ...priorityBorderStyle }}

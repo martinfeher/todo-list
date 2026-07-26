@@ -324,3 +324,37 @@ body {
   bottom: -0.25rem;
   cursor: nwse-resize;
 }
+
+.search-result-content-preview.task-details-editor {
+  cursor: default;
+  pointer-events: none;
+  color: #3f3f46;
+}
+
+.search-result-content-preview .detail-line {
+  min-height: 1.35em;
+}
+
+.search-result-content-preview .detail-line[data-empty="true"]::before,
+.search-result-content-preview .detail-line[data-body-placeholder="true"]::before {
+  content: none !important;
+}
+
+.search-result-content-preview .detail-line[data-empty="true"]:not(:has(.detail-image-wrapper)) {
+  display: none;
+}
+
+.search-result-content-preview .detail-image-delete,
+.search-result-content-preview .detail-image-resize-handles {
+  display: none !important;
+}
+
+.search-result-content-preview .detail-image-wrapper {
+  max-width: 100%;
+  cursor: default;
+}
+
+.search-result-content-preview .detail-image {
+  max-width: 100%;
+  cursor: default;
+}
