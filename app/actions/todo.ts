@@ -361,6 +361,17 @@ export async function updateTaskPinned(taskId: string, pinned: boolean) {
   return task;
 }
 
+export async function updateTaskBookmarked(taskId: string, bookmarked: boolean) {
+  const task = await prisma.task.update({
+    where: { id: taskId },
+    data: { bookmarked },
+    select: { id: true, bookmarked: true },
+  });
+
+  revalidatePath("/");
+  return task;
+}
+
 export async function renameTask(taskId: string, name: string) {
   const task = await prisma.task.update({
     where: { id: taskId },
@@ -454,7 +465,11 @@ export async function reorderTodoLists(listIds: string[]) {
   revalidatePath("/");
 }
 
-export async function createTask(listId: string, name: string) {
+export async function createTask(
+  listId: string,
+  name: string,
+  dueDate?: string | null,
+) {
   const task = await prisma.$transaction(async (tx) => {
     await tx.task.updateMany({
       where: { listId },
@@ -466,6 +481,8 @@ export async function createTask(listId: string, name: string) {
         listId,
         name,
         position: 0,
+        bookmarked: false,
+        dueDate: dueDate ? new Date(`${dueDate}T12:00:00`) : null,
       },
     });
   });

@@ -9,8 +9,7 @@ export const TASK_PRIORITY_OPTIONS: {
 }[] = [
   { level: 1, color: "#5566ee", label: "High priority" },
   { level: 2, color: "#F59E0B", label: "Medium priority" },
-  { level: 2, color: "#cccccc", label: "Low priority" },
-  { level: 3, color: "#55cc55", label: "Very Low priority" },
+  { level: 3, color: "#55cc55", label: "Low priority" },
 ];
 
 export function isTaskPriorityLevel(value: number): value is TaskPriorityLevel {

@@ -1,20 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  APP_FONT_STORAGE_KEY,
+  appFontCookieValue,
+  parseAppFont,
+  type AppFont,
+} from "@/lib/app-font";
 
-export type AppFont = "inter" | "sf-pro";
-
-const STORAGE_KEY = "todolist-app-font";
+export type { AppFont } from "@/lib/app-font";
 
 export function getStoredAppFont(): AppFont {
   if (typeof window === "undefined") return "inter";
 
-  const stored = localStorage.getItem(STORAGE_KEY);
-  return stored === "sf-pro" ? "sf-pro" : "inter";
+  const stored = localStorage.getItem(APP_FONT_STORAGE_KEY);
+  return parseAppFont(stored);
 }
 
 export function applyAppFont(font: AppFont) {
   document.documentElement.dataset.appFont = font;
+}
+
+function persistAppFont(font: AppFont) {
+  applyAppFont(font);
+  localStorage.setItem(APP_FONT_STORAGE_KEY, font);
+  document.cookie = appFontCookieValue(font);
 }
 
 const FONT_OPTIONS: { value: AppFont; label: string }[] = [
@@ -28,13 +38,12 @@ export function AppFontSwitcher() {
   useEffect(() => {
     const stored = getStoredAppFont();
     setFont(stored);
-    applyAppFont(stored);
+    persistAppFont(stored);
   }, []);
 
   function selectFont(next: AppFont) {
     setFont(next);
-    applyAppFont(next);
-    localStorage.setItem(STORAGE_KEY, next);
+    persistAppFont(next);
   }
 
   return (

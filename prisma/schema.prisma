@@ -32,6 +32,7 @@ model Task {
   dueTimeZone        String    @default("floating")
   position           Int       @default(0)
   pinned             Boolean   @default(false)
+  bookmarked         Boolean   @default(false)
   parentId           String?
   parent             Task?     @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: SetNull)
   subtasks           Task[]    @relation("TaskSubtasks")

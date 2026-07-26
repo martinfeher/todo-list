@@ -65,6 +65,7 @@ type TaskListTaskRowProps = {
   onToggleTaskMenu: (taskId: string) => void;
   onStartTitleEdit: (task: TaskListItem) => void;
   onToggleTaskPinned: (task: TaskListItem) => void;
+  onToggleTaskBookmarked: (task: TaskListItem) => void;
   onOpenLabelMenu: (taskId: string) => void;
   onOpenMoveMenu: (taskId: string) => void;
   onMoveQueryChange: (value: string) => void;
@@ -80,8 +81,10 @@ type TaskListTaskRowProps = {
   hasDueDateActions: boolean;
   hasPriorityActions: boolean;
   hasPinActions: boolean;
+  hasBookmarkActions: boolean;
   hasLabelActions: boolean;
   hasMoveActions: boolean;
+  useWiderRowPadding?: boolean;
 };
 
 function getRowMenuView(
@@ -134,6 +137,7 @@ export function TaskListTaskRow({
   onToggleTaskMenu,
   onStartTitleEdit,
   onToggleTaskPinned,
+  onToggleTaskBookmarked,
   onOpenLabelMenu,
   onOpenMoveMenu,
   onMoveQueryChange,
@@ -149,8 +153,10 @@ export function TaskListTaskRow({
   hasDueDateActions,
   hasPriorityActions,
   hasPinActions,
+  hasBookmarkActions,
   hasLabelActions,
   hasMoveActions,
+  useWiderRowPadding = false,
 }: TaskListTaskRowProps) {
   const rowMenuView = getRowMenuView(
     task.id,
@@ -163,7 +169,7 @@ export function TaskListTaskRow({
     (openDatePickerTaskId === task.id || rowMenuView !== null);
 
   const priorityColor = getTaskPriorityColor(task.priority);
-  const basePaddingLeft = priorityColor ? 5 : 8;
+  const basePaddingLeft = useWiderRowPadding ? 15 : priorityColor ? 2 : 5;
   const rowPaddingLeft = basePaddingLeft + depth * SUBTASK_INDENT_PX;
   const priorityBorderStyle = priorityColor
     ? { borderLeftWidth: 3, borderLeftStyle: "solid" as const, borderLeftColor: priorityColor }
@@ -197,7 +203,7 @@ export function TaskListTaskRow({
           ? (event) => onTaskDragStart(event, task.id)
           : undefined
       }
-      className={`group flex min-h-[35px] items-center gap-2 rounded-[3px] border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 cursor-pointer ${
+      className={`group flex min-h-[35px] items-center rounded-[3px] border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 cursor-pointer ${
         showDragHandle ? "touch-none" : ""
       } ${
         isSelected
@@ -209,9 +215,10 @@ export function TaskListTaskRow({
       {showDragHandle ? (
         <span
           aria-hidden="true"
-          className="flex size-[19px] shrink-0 cursor-move items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+          className="flex size-[19px] ml-[2px] mr-[1px] shrink-0 cursor-move items-center justify-center transition-opacity group-hover:opacity-100"
+          // className="flex size-[19px] ml-[2px] mr-[1px] shrink-0 cursor-move items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
         >
-          <InteractIcon className="size-3.5 text-[#949494]" />
+          <InteractIcon className="size-3.5 text-[#c3c6cc] group-hover:text-[#7e828b]" />
         </span>
       ) : null}
 
@@ -234,7 +241,7 @@ export function TaskListTaskRow({
           className="min-w-0 flex-1 bg-transparent text-sm text-zinc-900 outline-none dark:text-zinc-50"
         />
       ) : (
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 ml-2">
           <span className="block truncate text-left text-sm text-zinc-700 dark:text-zinc-50">
             {task.name}
           </span>
@@ -358,6 +365,7 @@ export function TaskListTaskRow({
                   onClose={onCloseTaskMenu}
                   onStartTitleEdit={() => onStartTitleEdit(task)}
                   onToggleTaskPinned={() => onToggleTaskPinned(task)}
+                  onToggleTaskBookmarked={() => onToggleTaskBookmarked(task)}
                   onOpenLabelMenu={() => onOpenLabelMenu(task.id)}
                   onOpenMoveMenu={() => onOpenMoveMenu(task.id)}
                   onMoveTaskToList={(targetListId) =>
@@ -372,6 +380,7 @@ export function TaskListTaskRow({
                   hasDueDateActions={hasDueDateActions}
                   hasPriorityActions={hasPriorityActions}
                   hasPinActions={hasPinActions}
+                  hasBookmarkActions={hasBookmarkActions}
                   hasLabelActions={hasLabelActions}
                   hasMoveActions={hasMoveActions}
                 />

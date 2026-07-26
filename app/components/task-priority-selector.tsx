@@ -28,7 +28,7 @@ export function TaskPrioritySelector({
 
           return (
             <button
-              key={option.level}
+              key={option.label}
               type="button"
               aria-label={option.label}
               title={option.label}

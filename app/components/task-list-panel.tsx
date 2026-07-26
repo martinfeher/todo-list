@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { BiSortAlt2 } from "react-icons/bi";
-import { LuCalendarCheck2, LuPlus } from "react-icons/lu";
+import { LuCalendarCheck2, LuCheck, LuPlus, LuX } from "react-icons/lu";
 import { PiArrowBendDownRight } from "react-icons/pi";
 import { createLabel, getLabels } from "@/app/actions/todo";
 import { TaskListTaskRow } from "./task-list-task-row";
@@ -188,6 +188,7 @@ type TaskListPanelProps = {
   onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
   onSetTaskPriority?: (taskId: string, priority: number | null) => void;
   onSetTaskPinned?: (taskId: string, pinned: boolean) => void;
+  onSetTaskBookmarked?: (taskId: string, bookmarked: boolean) => void;
   onToggleTaskLabel?: (
     taskId: string,
     labelId: string,
@@ -229,6 +230,7 @@ export function TaskListPanel({
   onSetTaskDueTime,
   onSetTaskPriority,
   onSetTaskPinned,
+  onSetTaskBookmarked,
   onToggleTaskLabel,
   onLabelsChanged,
   onMoveTaskToList,
@@ -489,11 +491,14 @@ export function TaskListPanel({
     });
   }, [isAddingTask]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function cancelAddTask() {
+    setIsAddingTask(false);
+    setNewTaskName("");
+  }
+
+  function submitNewTask() {
     if (!newTaskName.trim()) {
-      setIsAddingTask(false);
-      setNewTaskName("");
+      cancelAddTask();
       return;
     }
 
@@ -505,6 +510,11 @@ export function TaskListPanel({
       newTaskInputRef.current?.focus();
       keepAddTaskOpenRef.current = false;
     });
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    submitNewTask();
   }
 
   function startTitleEdit(task: TaskListItem) {
@@ -768,6 +778,11 @@ export function TaskListPanel({
 
   function handleToggleTaskPinned(task: TaskListItem) {
     onSetTaskPinned?.(task.id, !task.pinned);
+    closeTaskMenus();
+  }
+
+  function handleToggleTaskBookmarked(task: TaskListItem) {
+    onSetTaskBookmarked?.(task.id, !task.bookmarked);
     closeTaskMenus();
   }
 
@@ -1049,6 +1064,7 @@ export function TaskListPanel({
   ) {
     const hasLabelActions = Boolean(onToggleTaskLabel);
     const hasMoveActions = Boolean(onMoveTaskToList) && lists.length > 1;
+    const useWiderRowPadding = title === "Today" || title === "Bookmarks";
 
     return taskItems.flatMap((task, index) => {
       const depth = task.depth ?? 0;
@@ -1115,6 +1131,7 @@ export function TaskListPanel({
           onToggleTaskMenu={toggleTaskMenu}
           onStartTitleEdit={startTitleEdit}
           onToggleTaskPinned={handleToggleTaskPinned}
+          onToggleTaskBookmarked={handleToggleTaskBookmarked}
           onOpenLabelMenu={openLabelMenu}
           onOpenMoveMenu={openMoveMenu}
           onMoveQueryChange={setMoveQuery}
@@ -1130,8 +1147,10 @@ export function TaskListPanel({
           hasDueDateActions={Boolean(onSetTaskDueDate)}
           hasPriorityActions={Boolean(onSetTaskPriority)}
           hasPinActions={Boolean(onSetTaskPinned)}
+          hasBookmarkActions={Boolean(onSetTaskBookmarked)}
           hasLabelActions={hasLabelActions}
           hasMoveActions={hasMoveActions}
+          useWiderRowPadding={useWiderRowPadding}
         />
       );
 
@@ -1168,32 +1187,32 @@ export function TaskListPanel({
       {title ? (
         <div className="flex flex-col">
           {showHeader && (
-            <header className="border-b border-zinc-200 pl-[32px] pr-4 py-3 dark:border-zinc-800">
+            <header className="border-b border-zinc-200 pl-[26px] pr-4 py-3 dark:border-zinc-800">
               <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
                 {title}
               </h1>
             </header>
           )}
 
-          <div className="flex items-center justify-between gap-2 pl-[31px] pr-4 py-3">
+          <div className="flex items-center justify-between gap-2 pl-[26px] pr-4 py-3">
             {showAddTask ? (
               isAddingTask ? (
-                <form onSubmit={handleSubmit} className="min-w-0 flex-1">
+                <form
+                  onSubmit={handleSubmit}
+                  className="flex min-w-0 flex-1 mr-[40px]! items-center rounded-lg border border-[#c8d4f0] bg-white px-2 dark:border-zinc-600 dark:bg-zinc-900"
+                >
                   <input
                     ref={newTaskInputRef}
                     type="text"
                     value={newTaskName}
                     onChange={(event) => setNewTaskName(event.target.value)}
-                    placeholder={`+ Add Task`}
-                    // placeholder={`+ Add Task to - ${title}`}
-                    aria-label={`+ Add Task`}
-                    // aria-label={`+ Add Task to - ${title}`}
-                    className="h-[34px] w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 max-w-[190px] outline-none focus:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-zinc-500"
+                    placeholder="Task name"
+                    aria-label="Task name"
+                    className="min-w-0 flex-1 bg-transparent px-1 py-2 text-sm text-zinc-900 outline-none dark:text-zinc-50"
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
                         event.preventDefault();
-                        setIsAddingTask(false);
-                        setNewTaskName("");
+                        cancelAddTask();
                       }
                     }}
                     onBlur={() => {
@@ -1209,6 +1228,32 @@ export function TaskListPanel({
                       }, 0);
                     }}
                   />
+                  <button
+                    type="button"
+                    aria-label="Clear task name"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      if (newTaskName.trim()) {
+                        setNewTaskName("");
+                        newTaskInputRef.current?.focus();
+                        return;
+                      }
+
+                      cancelAddTask();
+                    }}
+                    className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded text-zinc-400 transition-colors hover:text-zinc-600 dark:hover:text-zinc-300"
+                  >
+                    <LuX className="size-4" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="submit"
+                    onMouseDown={(event) => event.preventDefault()}
+                    disabled={!newTaskName.trim()}
+                    className="flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md bg-zinc-400 px-[9px] text-xs font-medium text-white transition-colors enabled:hover:bg-zinc-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <LuCheck className="size-3.5" aria-hidden="true" />
+                    Add
+                  </button>
                 </form>
               ) : (
                 <button
@@ -1299,8 +1344,10 @@ export function TaskListPanel({
               <li className="pl-[33px] pr-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">
                 {title === "Today"
                   ? "No tasks for today"
-                  : title === "Next 7 days"
-                    ? "No tasks in the next 7 days"
+                  // : title === "Next 7 days"
+                  //   ? "No tasks in the next 7 days"
+                  : title === "Bookmarks"
+                    ? "No bookmarked tasks"
                     : title === "Calendar"
                       ? "No scheduled tasks"
                       : isLabelFilter
@@ -1366,6 +1413,9 @@ export function TaskListPanel({
             onClose={closeTaskMenus}
             onStartTitleEdit={() => startTitleEdit(pointerMenuTask)}
             onToggleTaskPinned={() => handleToggleTaskPinned(pointerMenuTask)}
+            onToggleTaskBookmarked={() =>
+              handleToggleTaskBookmarked(pointerMenuTask)
+            }
             onOpenLabelMenu={() => openLabelMenu(pointerMenuTask.id)}
             onOpenMoveMenu={() => openMoveMenu(pointerMenuTask.id)}
             onMoveTaskToList={(targetListId) =>
@@ -1384,6 +1434,7 @@ export function TaskListPanel({
             hasDueDateActions={Boolean(onSetTaskDueDate)}
             hasPriorityActions={Boolean(onSetTaskPriority)}
             hasPinActions={Boolean(onSetTaskPinned)}
+            hasBookmarkActions={Boolean(onSetTaskBookmarked)}
             hasLabelActions={Boolean(onToggleTaskLabel)}
             hasMoveActions={Boolean(onMoveTaskToList) && lists.length > 1}
           />

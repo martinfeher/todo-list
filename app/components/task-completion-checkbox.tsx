@@ -22,7 +22,7 @@ function CheckmarkOutlineIcon({
       {...props}
     >
       <path d={CHECKMARK_OUTLINE_CIRCLE_PATH} fillRule="evenodd" />
-      <path d={CHECKMARK_OUTLINE_CHECK_PATH} />
+      <path className="opacity-70" d={CHECKMARK_OUTLINE_CHECK_PATH} />
     </svg>
   );
 }
@@ -54,8 +54,8 @@ export function TaskCompletionCheckbox({
       }}
       className={`inline-flex shrink-0 items-center justify-center rounded-full p-0 transition-colors hover:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60 dark:hover:text-zinc-300 dark:focus-visible:ring-zinc-500/60 ${
         checked
-          ? "text-[#68967c] dark:text-zinc-300"
-          : "text-[#7ab794] hover:text-[#6d9d82] dark:text-zinc-500 dark:hover:text-zinc-400 cursor-pointer"
+          ? "text-[#5b8b6f] dark:text-zinc-300"
+          : "text-[#31d988] hover:text-[#5b8b6f] dark:text-zinc-500 dark:hover:text-zinc-400 cursor-pointer"
       } ${className}`}
     >
       <CheckmarkOutlineIcon className="size-[19px]" />

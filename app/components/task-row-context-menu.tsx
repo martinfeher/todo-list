@@ -27,6 +27,7 @@ type TaskRowContextMenuProps = {
   onClose: () => void;
   onStartTitleEdit: () => void;
   onToggleTaskPinned: () => void;
+  onToggleTaskBookmarked: () => void;
   onOpenLabelMenu: () => void;
   onOpenMoveMenu: () => void;
   onMoveTaskToList: (listId: string) => void;
@@ -37,6 +38,7 @@ type TaskRowContextMenuProps = {
   hasDueDateActions: boolean;
   hasPriorityActions: boolean;
   hasPinActions: boolean;
+  hasBookmarkActions: boolean;
   hasLabelActions: boolean;
   hasMoveActions: boolean;
 };
@@ -51,6 +53,7 @@ function MainMenuItems({
   task,
   view,
   hasPinActions,
+  hasBookmarkActions,
   hasPriorityActions,
   hasDueDateActions,
   hasLabelActions,
@@ -58,6 +61,7 @@ function MainMenuItems({
   onClose,
   onStartTitleEdit,
   onToggleTaskPinned,
+  onToggleTaskBookmarked,
   onOpenLabelMenu,
   onOpenMoveMenu,
   onClearTaskDueDate,
@@ -68,6 +72,7 @@ function MainMenuItems({
   | "task"
   | "view"
   | "hasPinActions"
+  | "hasBookmarkActions"
   | "hasPriorityActions"
   | "hasDueDateActions"
   | "hasLabelActions"
@@ -75,6 +80,7 @@ function MainMenuItems({
   | "onClose"
   | "onStartTitleEdit"
   | "onToggleTaskPinned"
+  | "onToggleTaskBookmarked"
   | "onOpenLabelMenu"
   | "onOpenMoveMenu"
   | "onClearTaskDueDate"
@@ -109,6 +115,19 @@ function MainMenuItems({
           }}
         >
           {task.pinned ? "Unpin task" : "Pin task"}
+        </button>
+      ) : null}
+      {hasBookmarkActions ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={menuItemClassName}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleTaskBookmarked();
+          }}
+        >
+          {task.bookmarked ? "Remove bookmark" : "Bookmark task"}
         </button>
       ) : null}
       {hasPriorityActions ? (
@@ -188,6 +207,7 @@ export function TaskRowContextMenu({
   onClose,
   onStartTitleEdit,
   onToggleTaskPinned,
+  onToggleTaskBookmarked,
   onOpenLabelMenu,
   onOpenMoveMenu,
   onMoveTaskToList,
@@ -198,6 +218,7 @@ export function TaskRowContextMenu({
   hasDueDateActions,
   hasPriorityActions,
   hasPinActions,
+  hasBookmarkActions,
   hasLabelActions,
   hasMoveActions,
 }: TaskRowContextMenuProps) {
@@ -208,6 +229,7 @@ export function TaskRowContextMenu({
           task={task}
           view={view}
           hasPinActions={hasPinActions}
+          hasBookmarkActions={hasBookmarkActions}
           hasPriorityActions={hasPriorityActions}
           hasDueDateActions={hasDueDateActions}
           hasLabelActions={hasLabelActions}
@@ -215,6 +237,7 @@ export function TaskRowContextMenu({
           onClose={onClose}
           onStartTitleEdit={onStartTitleEdit}
           onToggleTaskPinned={onToggleTaskPinned}
+          onToggleTaskBookmarked={onToggleTaskBookmarked}
           onOpenLabelMenu={onOpenLabelMenu}
           onOpenMoveMenu={onOpenMoveMenu}
           onClearTaskDueDate={onClearTaskDueDate}
@@ -229,6 +252,7 @@ export function TaskRowContextMenu({
             task={task}
             view={view}
             hasPinActions={hasPinActions}
+            hasBookmarkActions={hasBookmarkActions}
             hasPriorityActions={hasPriorityActions}
             hasDueDateActions={hasDueDateActions}
             hasLabelActions={hasLabelActions}
@@ -236,6 +260,7 @@ export function TaskRowContextMenu({
             onClose={onClose}
             onStartTitleEdit={onStartTitleEdit}
             onToggleTaskPinned={onToggleTaskPinned}
+            onToggleTaskBookmarked={onToggleTaskBookmarked}
             onOpenLabelMenu={onOpenLabelMenu}
             onOpenMoveMenu={onOpenMoveMenu}
             onClearTaskDueDate={onClearTaskDueDate}

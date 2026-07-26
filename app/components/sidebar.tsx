@@ -4,8 +4,8 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { IoIosSearch } from "react-icons/io";
 import { IoPricetagsOutline } from "react-icons/io5";
-import { LuPlus } from "react-icons/lu";
-import { BsCalendar2 } from "react-icons/bs";
+import { LuBookmark, LuPlus } from "react-icons/lu";
+// import { BsCalendar2 } from "react-icons/bs";
 import { BsCalendar3 } from "react-icons/bs";
 
 import type { CompletedTask, SearchTask, TaskLabel, TodoList } from "./todo-app";
@@ -30,7 +30,8 @@ const SearchModal = dynamic(
 const NAV_ITEMS = [
   { label: "Search", action: "search" as const },
   { label: "Today", action: "today" as const },
-  { label: "Next 7 days", action: "next7days" as const },
+  // { label: "Next 7 days", action: "next7days" as const },
+  { label: "Bookmarks", action: "bookmarked" as const },
   { label: "Calendar", action: "calendar" as const },
 ];
 
@@ -43,13 +44,15 @@ type SidebarProps = {
   selectedListId: string | null;
   selectedLabelId: string | null;
   isTodaySelected: boolean;
-  isNext7DaysSelected: boolean;
+  // isNext7DaysSelected: boolean;
+  isBookmarkedSelected: boolean;
   isCalendarSelected: boolean;
   selectedTaskId: string | null;
   onSelectList: (listId: string) => void;
   onSelectLabel: (labelId: string) => void;
   onSelectToday: () => void;
-  onSelectNext7Days: () => void;
+  // onSelectNext7Days: () => void;
+  onSelectBookmarked: () => void;
   onSelectCalendar: () => void;
   onSelectCompletedTask: (taskId: string, listId: string) => void;
   onSelectSearchTask: (taskId: string, listId: string) => void;
@@ -96,13 +99,15 @@ export function Sidebar({
   selectedListId,
   selectedLabelId,
   isTodaySelected,
-  isNext7DaysSelected,
+  // isNext7DaysSelected,
+  isBookmarkedSelected,
   isCalendarSelected,
   selectedTaskId,
   onSelectList,
   onSelectLabel,
   onSelectToday,
-  onSelectNext7Days,
+  // onSelectNext7Days,
+  onSelectBookmarked,
   onSelectCalendar,
   onSelectCompletedTask,
   onSelectSearchTask,
@@ -405,7 +410,8 @@ export function Sidebar({
           {NAV_ITEMS.map((item) => {
             const isNavItemSelected =
               (item.action === "today" && isTodaySelected) ||
-              (item.action === "next7days" && isNext7DaysSelected) ||
+              // (item.action === "next7days" && isNext7DaysSelected) ||
+              (item.action === "bookmarked" && isBookmarkedSelected) ||
               (item.action === "calendar" && isCalendarSelected);
             const navIconColor = isNavItemSelected
               ? "text-[#111111]"
@@ -418,8 +424,10 @@ export function Sidebar({
               onClick={
                 item.action === "today"
                   ? onSelectToday
-                  : item.action === "next7days"
-                    ? onSelectNext7Days
+                  // : item.action === "next7days"
+                  //   ? onSelectNext7Days
+                  : item.action === "bookmarked"
+                    ? onSelectBookmarked
                     : item.action === "calendar"
                       ? onSelectCalendar
                       : item.action === "search"
@@ -445,8 +453,14 @@ export function Sidebar({
                   className={`size-[20px] -ml-[2px] shrink-0 ${navIconColor}`}
                 />
               ) : null}
-              {item.action === "next7days" ? (
+              {/* {item.action === "next7days" ? (
                 <BsCalendar2
+                  className={`size-[15px] shrink-0 ${navIconColor}`}
+                  aria-hidden="true"
+                />
+              ) : null} */}
+              {item.action === "bookmarked" ? (
+                <LuBookmark
                   className={`size-[15px] shrink-0 ${navIconColor}`}
                   aria-hidden="true"
                 />
@@ -460,7 +474,7 @@ export function Sidebar({
               {item.label}
               {item.action === "search" ? (
                 <div
-                  className="ml-auto flex size-[28px] shrink-0 items-center justify-center rounded-full bg-[#eceff4]/75"
+                  className="ml-auto flex size-[28px] shrink-0 items-center justify-center rounded-full bg-[#eceff4]/75 mr-[1px] border border-[#eee8ef]"
                   aria-hidden="true"
                 >
                   <div className="flex items-center gap-px text-[#a1a7be]/50">
@@ -492,7 +506,8 @@ export function Sidebar({
               onClick={() => handleListClick(list.id)}
               className={`group relative flex h-[35px] items-center touch-none rounded-[3px] cursor-pointer ${
                 !isTodaySelected &&
-                !isNext7DaysSelected &&
+                // !isNext7DaysSelected &&
+                !isBookmarkedSelected &&
                 !isCalendarSelected &&
                 !selectedLabelId &&
                 list.id === selectedListId

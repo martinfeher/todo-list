@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { Inter } from "next/font/google";
 import localFont from "next/font/local";
+import { APP_FONT_STORAGE_KEY, parseAppFont } from "@/lib/app-font";
 import "./globals.css";
 
 const inter = Inter({
@@ -21,26 +23,21 @@ export const metadata: Metadata = {
   description: "A simple todo list app",
 };
 
-const APP_FONT_INIT_SCRIPT = `(function(){try{var f=localStorage.getItem("todolist-app-font");if(f==="sf-pro")document.documentElement.dataset.appFont="sf-pro";}catch(e){}})();`;
-
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const appFont = parseAppFont(cookieStore.get(APP_FONT_STORAGE_KEY)?.value);
+
   return (
     <html
       lang="en"
-      data-app-font="inter"
+      data-app-font={appFont}
       className={`${inter.variable} ${sfPro.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <head>
-        <script
-          suppressHydrationWarning
-          dangerouslySetInnerHTML={{ __html: APP_FONT_INIT_SCRIPT }}
-        />
-      </head>
       <body className="min-h-full flex flex-col font-sans">
         {children}
       </body>

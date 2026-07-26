@@ -447,7 +447,7 @@ export function SearchModal({
                     <button
                       type="button"
                       onClick={() => selectTask(task)}
-                      className="min-w-0 flex-1 py-2 text-left"
+                      className="min-w-0 flex-1 py-2 text-left max-w-[183px]"
                     >
                       <span
                         className={`block truncate text-sm ${
