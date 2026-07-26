@@ -26,7 +26,7 @@ type SearchScope = "all" | "names" | "content";
 const SEARCH_SCOPE_TABS: { id: SearchScope; label: string }[] = [
   { id: "all", label: "All" },
   { id: "names", label: "Names" },
-  { id: "content", label: "Content" },
+  { id: "content", label: "Task content" },
 ];
 
 type IndexedSearchTask = SearchTask & {
@@ -354,7 +354,7 @@ export function SearchModal({
                     }}
                     role="option"
                     aria-selected={index === activeIndex}
-                    className={`flex min-h-[44px] items-center gap-3 border-b border-zinc-100 px-4 py-2 dark:border-zinc-800 ${
+                    className={`flex min-h-[44px] items-center gap-3 border-b border-zinc-100 px-4 py-2 dark:border-zinc-800 cursor-pointer ${
                       index === activeIndex
                         ? "bg-zinc-100 dark:bg-zinc-800"
                         : ""

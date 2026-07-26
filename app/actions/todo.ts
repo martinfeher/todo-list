@@ -9,8 +9,8 @@ import {
   type TaskDueTime,
 } from "@/lib/task-due-time";
 import {
-  LABEL_TAG_CATEGORY,
-  labelTagSlug,
+  LABEL_CATEGORY,
+  labelSlug,
   normalizePriority,
   PRIORITY_TAG_CATEGORY,
   prioritySlug,
@@ -149,9 +149,9 @@ export async function updateTaskPriority(taskId: string, priority: number | null
   };
 }
 
-export async function getLabelTags() {
+export async function getLabels() {
   return prisma.tag.findMany({
-    where: { category: LABEL_TAG_CATEGORY },
+    where: { category: LABEL_CATEGORY },
     orderBy: { label: "asc" },
     select: {
       id: true,
@@ -160,11 +160,11 @@ export async function getLabelTags() {
   });
 }
 
-export async function getTaskLabelTags(taskId: string) {
+export async function getTaskLabels(taskId: string) {
   const entries = await prisma.taskTag.findMany({
     where: {
       taskId,
-      tag: { category: LABEL_TAG_CATEGORY },
+      tag: { category: LABEL_CATEGORY },
     },
     include: {
       tag: {
@@ -182,19 +182,19 @@ export async function getTaskLabelTags(taskId: string) {
   return entries.map((entry) => entry.tag);
 }
 
-export async function createLabelTag(label: string) {
+export async function createLabel(label: string) {
   const trimmed = label.trim();
   if (!trimmed) {
-    throw new Error("Tag label is required");
+    throw new Error("Label is required");
   }
 
-  const slug = labelTagSlug(trimmed);
+  const slug = labelSlug(trimmed);
   const tag = await prisma.tag.upsert({
     where: { slug },
     create: {
       slug,
       label: trimmed,
-      category: LABEL_TAG_CATEGORY,
+      category: LABEL_CATEGORY,
     },
     update: {
       label: trimmed,
@@ -209,37 +209,37 @@ export async function createLabelTag(label: string) {
   return tag;
 }
 
-export async function applyTaskLabelTags(
+export async function applyTaskLabels(
   taskId: string,
-  tagIds: string[],
-  newTagLabel?: string | null,
+  labelIds: string[],
+  newLabelName?: string | null,
 ) {
-  const uniqueTagIds = new Set(tagIds);
+  const uniqueLabelIds = new Set(labelIds);
 
-  if (newTagLabel?.trim()) {
-    const trimmed = newTagLabel.trim();
-    const slug = labelTagSlug(trimmed);
+  if (newLabelName?.trim()) {
+    const trimmed = newLabelName.trim();
+    const slug = labelSlug(trimmed);
     const tag = await prisma.tag.upsert({
       where: { slug },
       create: {
         slug,
         label: trimmed,
-        category: LABEL_TAG_CATEGORY,
+        category: LABEL_CATEGORY,
       },
       update: {
         label: trimmed,
       },
       select: { id: true },
     });
-    uniqueTagIds.add(tag.id);
+    uniqueLabelIds.add(tag.id);
   }
 
-  if (uniqueTagIds.size === 0) {
-    throw new Error("Select or type at least one tag");
+  if (uniqueLabelIds.size === 0) {
+    throw new Error("Select or type at least one label");
   }
 
   await prisma.$transaction(
-    [...uniqueTagIds].map((tagId) =>
+    [...uniqueLabelIds].map((tagId) =>
       prisma.taskTag.upsert({
         where: {
           taskId_tagId: {
@@ -257,12 +257,12 @@ export async function applyTaskLabelTags(
   );
 
   revalidatePath("/");
-  return getTaskLabelTags(taskId);
+  return getTaskLabels(taskId);
 }
 
-export async function setTaskLabelTag(
+export async function setTaskLabel(
   taskId: string,
-  tagId: string,
+  labelId: string,
   assigned: boolean,
 ) {
   if (assigned) {
@@ -270,12 +270,12 @@ export async function setTaskLabelTag(
       where: {
         taskId_tagId: {
           taskId,
-          tagId,
+          tagId: labelId,
         },
       },
       create: {
         taskId,
-        tagId,
+        tagId: labelId,
       },
       update: {},
     });
@@ -283,23 +283,23 @@ export async function setTaskLabelTag(
     await prisma.taskTag.deleteMany({
       where: {
         taskId,
-        tagId,
-        tag: { category: LABEL_TAG_CATEGORY },
+        tagId: labelId,
+        tag: { category: LABEL_CATEGORY },
       },
     });
   }
 
   revalidatePath("/");
-  return getTaskLabelTags(taskId);
+  return getTaskLabels(taskId);
 }
 
-export async function addTaskTag(taskId: string, label: string) {
+export async function addTaskLabel(taskId: string, label: string) {
   const trimmed = label.trim();
   if (!trimmed) {
-    throw new Error("Tag label is required");
+    throw new Error("Label is required");
   }
 
-  const slug = labelTagSlug(trimmed);
+  const slug = labelSlug(trimmed);
 
   await prisma.$transaction(async (tx) => {
     const tag = await tx.tag.upsert({
@@ -307,7 +307,7 @@ export async function addTaskTag(taskId: string, label: string) {
       create: {
         slug,
         label: trimmed,
-        category: LABEL_TAG_CATEGORY,
+        category: LABEL_CATEGORY,
       },
       update: {
         label: trimmed,

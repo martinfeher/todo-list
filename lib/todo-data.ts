@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import {
-  getLabelTagsFromTaskTags,
+  getLabelsFromTaskTags,
   getPriorityFromTaskTags,
-  LABEL_TAG_CATEGORY,
+  LABEL_CATEGORY,
   PRIORITY_TAG_CATEGORY,
   PRIORITY_TAGS,
 } from "@/lib/task-tags";
@@ -91,8 +91,8 @@ export async function getTodoData() {
 
   return {
     lists: lists.map(({ id, name }) => ({ id, name })),
-    labelTags: await prisma.tag.findMany({
-      where: { category: LABEL_TAG_CATEGORY },
+    labels: await prisma.tag.findMany({
+      where: { category: LABEL_CATEGORY },
       orderBy: { label: "asc" },
       select: { id: true, label: true },
     }),
@@ -122,7 +122,7 @@ export async function getTodoData() {
           dueDurationMinutes,
           dueTimeZone: normalizeDueTimeZone(dueTimeZone),
           priority: getPriorityFromTaskTags(tags),
-          tags: getLabelTagsFromTaskTags(tags),
+          labels: getLabelsFromTaskTags(tags),
           pinned: Boolean(pinned),
           parentId: parentId ?? null,
         }),

@@ -5,8 +5,8 @@ import {
   createTask,
   createTodoList,
   deleteTodoList,
-  getLabelTags,
-  setTaskLabelTag as setTaskLabelTagInDb,
+  getLabels,
+  setTaskLabel as setTaskLabelInDb,
   moveTaskToList as moveTaskToListInDb,
   renameTask as renameTaskInDb,
   renameTodoList,
@@ -27,7 +27,7 @@ import { mergeReorderedPinnedTasks, mergeReorderedUnpinnedTasks } from "./task-r
 import { AppFontSwitcher } from "./app-font-switcher";
 import { UndoButton } from "./undo-button";
 
-export type TaskTag = {
+export type TaskLabel = {
   id: string;
   label: string;
 };
@@ -44,7 +44,7 @@ export type Task = {
   priority: number | null;
   pinned: boolean;
   parentId: string | null;
-  tags: TaskTag[];
+  labels: TaskLabel[];
 };
 
 export type TodoList = {
@@ -70,7 +70,7 @@ type PendingUndo = {
 
 type TodoAppProps = {
   initialLists: TodoList[];
-  initialLabelTags: TaskTag[];
+  initialLabels: TaskLabel[];
   initialTasksByList: Record<string, Task[]>;
 };
 
@@ -82,7 +82,7 @@ function withPinnedDefaults(tasksByList: Record<string, Task[]>) {
         ...task,
         pinned: Boolean(task.pinned),
         parentId: task.parentId ?? null,
-        tags: task.tags ?? [],
+        labels: task.labels ?? [],
       })),
     ]),
   ) as Record<string, Task[]>;
@@ -127,8 +127,8 @@ function isDueInNext7Days(dueDate: string | null) {
   return date.getTime() >= today.getTime() && date.getTime() < end.getTime();
 }
 
-function getTasksByTag(
-  tagId: string,
+function getTasksByLabel(
+  labelId: string,
   lists: TodoList[],
   tasksByList: Record<string, Task[]>,
 ): TaskListItem[] {
@@ -136,7 +136,7 @@ function getTasksByTag(
     (tasksByList[list.id] ?? [])
       .filter(
         (task) =>
-          !task.completed && task.tags.some((tag) => tag.id === tagId),
+          !task.completed && task.labels.some((item) => item.id === labelId),
       )
       .map((task) => ({
         ...task,
@@ -151,12 +151,12 @@ type ActiveView = "today" | "next7days" | "calendar" | null;
 function getVisibleTasks(
   activeView: ActiveView,
   listId: string | null,
-  selectedTagId: string | null,
+  selectedLabelId: string | null,
   lists: TodoList[],
   tasksByList: Record<string, Task[]>,
 ): TaskListItem[] {
-  if (selectedTagId) {
-    return getTasksByTag(selectedTagId, lists, tasksByList);
+  if (selectedLabelId) {
+    return getTasksByLabel(selectedLabelId, lists, tasksByList);
   }
 
   if (activeView === "today") {
@@ -217,14 +217,14 @@ function getVisibleTasks(
 function getFirstVisibleTaskId(
   activeView: ActiveView,
   listId: string | null,
-  selectedTagId: string | null,
+  selectedLabelId: string | null,
   lists: TodoList[],
   tasksByList: Record<string, Task[]>,
 ) {
   return getVisibleTasks(
     activeView,
     listId,
-    selectedTagId,
+    selectedLabelId,
     lists,
     tasksByList,
   )[0]?.id ?? null;
@@ -237,13 +237,13 @@ export type TaskListItem = Task & {
 
 export function TodoApp({
   initialLists,
-  initialLabelTags,
+  initialLabels,
   initialTasksByList,
 }: TodoAppProps) {
   const [lists, setLists] = useState(initialLists);
-  const [labelTags, setLabelTags] = useState(initialLabelTags);
+  const [labels, setLabels] = useState(initialLabels);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
-  const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
+  const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [focusNoteAtEndRequest, setFocusNoteAtEndRequest] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>(null);
@@ -258,8 +258,8 @@ export function TodoApp({
   const completionTimerRef = useRef<Record<string, number>>({});
 
   const selectedList = lists.find((list) => list.id === selectedListId) ?? null;
-  const selectedTag =
-    labelTags.find((tag) => tag.id === selectedTagId) ?? null;
+  const selectedLabel =
+    labels.find((item) => item.id === selectedLabelId) ?? null;
 
   const calendarTasks: TaskListItem[] = getVisibleTasks(
     "calendar",
@@ -270,8 +270,8 @@ export function TodoApp({
   );
 
   const taskListTitle =
-    selectedTag
-      ? selectedTag.label
+    selectedLabel
+      ? selectedLabel.label
       : activeView === "today"
         ? "Today"
         : activeView === "next7days"
@@ -283,7 +283,7 @@ export function TodoApp({
   const taskListItems: TaskListItem[] = getVisibleTasks(
     activeView,
     selectedListId,
-    selectedTagId,
+    selectedLabelId,
     lists,
     tasksByList,
   );
@@ -394,13 +394,13 @@ export function TodoApp({
     [clearCompletionTimer, removeCompletingTask],
   );
 
-  const refreshLabelTags = useCallback(() => {
-    void getLabelTags().then(setLabelTags);
+  const refreshLabels = useCallback(() => {
+    void getLabels().then(setLabels);
   }, []);
 
   function selectList(listId: string) {
     setActiveView(null);
-    setSelectedTagId(null);
+    setSelectedLabelId(null);
     setSelectedListId(listId);
     setSelectedTaskId(
       getFirstVisibleTaskId(null, listId, null, lists, tasksByList),
@@ -409,7 +409,7 @@ export function TodoApp({
 
   function selectToday() {
     setActiveView("today");
-    setSelectedTagId(null);
+    setSelectedLabelId(null);
     setSelectedListId(null);
     setSelectedTaskId(
       getFirstVisibleTaskId("today", null, null, lists, tasksByList),
@@ -418,7 +418,7 @@ export function TodoApp({
 
   function selectNext7Days() {
     setActiveView("next7days");
-    setSelectedTagId(null);
+    setSelectedLabelId(null);
     setSelectedListId(null);
     setSelectedTaskId(
       getFirstVisibleTaskId("next7days", null, null, lists, tasksByList),
@@ -427,23 +427,23 @@ export function TodoApp({
 
   function selectCalendar() {
     setActiveView("calendar");
-    setSelectedTagId(null);
+    setSelectedLabelId(null);
     setSelectedListId(null);
     setSelectedTaskId(null);
   }
 
-  function selectTag(tagId: string) {
+  function selectLabel(labelId: string) {
     setActiveView(null);
     setSelectedListId(null);
-    setSelectedTagId(tagId);
+    setSelectedLabelId(labelId);
     setSelectedTaskId(
-      getFirstVisibleTaskId(null, null, tagId, lists, tasksByList),
+      getFirstVisibleTaskId(null, null, labelId, lists, tasksByList),
     );
   }
 
   function selectCompletedTask(taskId: string, listId: string) {
     setActiveView(null);
-    setSelectedTagId(null);
+    setSelectedLabelId(null);
     setSelectedListId(listId);
     setSelectedTaskId(taskId);
   }
@@ -460,7 +460,7 @@ export function TodoApp({
     setLists((current) => [...current, { id: list.id, name: list.name }]);
     setTasksByList((current) => ({ ...current, [list.id]: [] }));
     setActiveView(null);
-    setSelectedTagId(null);
+    setSelectedLabelId(null);
     setSelectedListId(list.id);
     setSelectedTaskId(null);
   }
@@ -522,7 +522,7 @@ export function TodoApp({
       priority: null,
       pinned: false,
       parentId: null,
-      tags: [],
+      labels: [],
     };
 
     setTasksByList((current) => ({
@@ -698,14 +698,14 @@ export function TodoApp({
     });
   }, []);
 
-  const handleTaskTagsUpdated = useCallback(
-    (taskId: string, tags: TaskTag[]) => {
+  const handleTaskLabelsUpdated = useCallback(
+    (taskId: string, nextLabels: TaskLabel[]) => {
       setTasksByList((current) => {
         const next = { ...current };
 
         for (const listId of Object.keys(next)) {
           next[listId] = next[listId].map((task) =>
-            task.id === taskId ? { ...task, tags } : task,
+            task.id === taskId ? { ...task, labels: nextLabels } : task,
           );
         }
 
@@ -781,15 +781,15 @@ export function TodoApp({
     }
   }
 
-  async function toggleTaskLabelTag(
+  async function toggleTaskLabel(
     taskId: string,
-    tagId: string,
+    labelId: string,
     assigned: boolean,
   ) {
-    const updatedTags = await setTaskLabelTagInDb(taskId, tagId, assigned);
-    handleTaskTagsUpdated(taskId, updatedTags);
-    refreshLabelTags();
-    return updatedTags;
+    const updatedLabels = await setTaskLabelInDb(taskId, labelId, assigned);
+    handleTaskLabelsUpdated(taskId, updatedLabels);
+    refreshLabels();
+    return updatedLabels;
   }
 
   async function moveTaskToList(
@@ -903,18 +903,18 @@ export function TodoApp({
       <div className="flex h-dvh min-h-0 flex-1 overflow-hidden">
         <Sidebar
           lists={lists}
-          labelTags={labelTags}
+          labels={labels}
           taskCountByListId={taskCountByListId}
           completedTasks={completedTasks}
           searchTasks={searchTasks}
           selectedListId={selectedListId}
-          selectedTagId={selectedTagId}
+          selectedLabelId={selectedLabelId}
           isTodaySelected={activeView === "today"}
           isNext7DaysSelected={activeView === "next7days"}
           isCalendarSelected={activeView === "calendar"}
           selectedTaskId={selectedTaskId}
           onSelectList={selectList}
-          onSelectTag={selectTag}
+          onSelectLabel={selectLabel}
           onSelectToday={selectToday}
           onSelectNext7Days={selectNext7Days}
           onSelectCalendar={selectCalendar}
@@ -938,8 +938,8 @@ export function TodoApp({
             onSetTaskDueDate={setTaskDueDate}
             onSetTaskDueTime={setTaskDueTime}
             onSetTaskPriority={setTaskPriority}
-            onToggleTaskLabelTag={toggleTaskLabelTag}
-            onLabelTagsChanged={refreshLabelTags}
+            onToggleTaskLabel={toggleTaskLabel}
+            onLabelsChanged={refreshLabels}
             onMoveTaskToList={moveTaskToList}
           />
         ) : (
@@ -952,7 +952,7 @@ export function TodoApp({
               selectedTaskId={selectedTaskId}
               expanded={!showDetailsPanel}
               showAddTask={selectedListId !== null}
-              isTagFilter={selectedTagId !== null}
+              isLabelFilter={selectedLabelId !== null}
               listId={selectedListId}
               onAddTask={addTask}
               onToggleTask={toggleTask}
@@ -964,8 +964,8 @@ export function TodoApp({
               onSetTaskDueTime={setTaskDueTime}
               onSetTaskPriority={setTaskPriority}
               onSetTaskPinned={setTaskPinned}
-              onToggleTaskLabelTag={toggleTaskLabelTag}
-              onLabelTagsChanged={refreshLabelTags}
+              onToggleTaskLabel={toggleTaskLabel}
+              onLabelsChanged={refreshLabels}
               onMoveTaskToList={moveTaskToList}
             />
             {showDetailsPanel && (

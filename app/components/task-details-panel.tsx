@@ -63,7 +63,16 @@ import {
   getLinkFromSelection,
   normalizeLinks,
 } from "./detail-links";
-import { normalizeEditorFonts } from "./detail-fonts";
+import {
+  clearPasteBatchMarkers,
+  insertPasteFragmentAtSelection,
+  PASTE_FORMAT_PROMPT_MS,
+  pastedHtmlHasFormatting,
+  preparePasteFragment,
+  resetFontFamilyInPasteBatch,
+  resetFontSizeInPasteBatch,
+  stripFormattingInPasteBatch,
+} from "./detail-fonts";
 import { TaskDatePicker } from "./task-date-picker";
 import {
   BulletListIcon,
@@ -347,6 +356,14 @@ export function TaskDetailsPanel({
   const [showLinkMenu, setShowLinkMenu] = useState(false);
   const [linkText, setLinkText] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const [pasteFormatPrompt, setPasteFormatPrompt] = useState<{
+    pasteId: string;
+    top: number;
+    left: number;
+    removeFormatting: boolean;
+    useDefaultFont: boolean;
+    useDefaultSize: boolean;
+  } | null>(null);
   const savedDetailsRef = useRef("");
   const detailsRef = useRef("");
   const taskIdRef = useRef<string | null>(null);
@@ -382,6 +399,8 @@ export function TaskDetailsPanel({
   const isApplyingHistoryRef = useRef(false);
   const isReadyRef = useRef(false);
   const imageDropDepthRef = useRef(0);
+  const pasteFormatPromptTimerRef = useRef<number | null>(null);
+  const pasteFormatPromptRef = useRef(pasteFormatPrompt);
 
   const readEditorContent = useCallback(() => {
     return normalizeDetails(editorRef.current?.innerHTML ?? "");
@@ -617,6 +636,139 @@ export function TaskDetailsPanel({
     savedLinkSelectionRef.current = null;
   }, []);
 
+  useEffect(() => {
+    pasteFormatPromptRef.current = pasteFormatPrompt;
+  }, [pasteFormatPrompt]);
+
+  const dismissPasteFormatPrompt = useCallback((pasteId?: string) => {
+    if (pasteFormatPromptTimerRef.current !== null) {
+      window.clearTimeout(pasteFormatPromptTimerRef.current);
+      pasteFormatPromptTimerRef.current = null;
+    }
+
+    const editor = editorRef.current;
+    const idToClear = pasteId ?? pasteFormatPromptRef.current?.pasteId;
+    if (editor && idToClear) {
+      clearPasteBatchMarkers(editor, idToClear);
+    }
+
+    setPasteFormatPrompt(null);
+  }, []);
+
+  const getPastePromptPosition = useCallback(() => {
+    const editor = editorRef.current;
+    const wrapper = editorWrapperRef.current;
+    if (!editor || !wrapper) {
+      return { top: 12, left: 12 };
+    }
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      return { top: 12, left: 12 };
+    }
+
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    const wrapperRect = wrapper.getBoundingClientRect();
+
+    return {
+      top: Math.max(8, rect.bottom - wrapperRect.top + 8),
+      left: Math.max(8, rect.left - wrapperRect.left),
+    };
+  }, []);
+
+  const showPasteFormatPrompt = useCallback(
+    (pasteId: string) => {
+      dismissPasteFormatPrompt();
+
+      const position = getPastePromptPosition();
+      setPasteFormatPrompt({
+        pasteId,
+        top: position.top,
+        left: position.left,
+        removeFormatting: false,
+        useDefaultFont: false,
+        useDefaultSize: false,
+      });
+
+      pasteFormatPromptTimerRef.current = window.setTimeout(() => {
+        dismissPasteFormatPrompt(pasteId);
+      }, PASTE_FORMAT_PROMPT_MS);
+    },
+    [dismissPasteFormatPrompt, getPastePromptPosition],
+  );
+
+  const finalizePasteEditorState = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    ensureBlockLines(editor);
+    splitBlockLinesOnBreaks(editor);
+    ensureTitleLine(editor);
+    normalizeLinks(editor);
+    syncLineEmptyState(editor);
+    syncEditorContent();
+    syncTitleToTaskList();
+    recordHistorySnapshot();
+    scheduleAutoSave();
+    updateLineControls();
+  }, [
+    recordHistorySnapshot,
+    scheduleAutoSave,
+    syncEditorContent,
+    syncTitleToTaskList,
+    updateLineControls,
+  ]);
+
+  const applyPasteFormatOption = useCallback(
+    (
+      option: "removeFormatting" | "useDefaultFont" | "useDefaultSize",
+      enabled: boolean,
+    ) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      setPasteFormatPrompt((current) => {
+        if (!current) return current;
+
+        const next = { ...current, [option]: enabled };
+        const pasteId = current.pasteId;
+
+        requestAnimationFrame(() => {
+          const currentEditor = editorRef.current;
+          if (!currentEditor) return;
+
+          if (enabled) {
+            if (option === "removeFormatting") {
+              stripFormattingInPasteBatch(currentEditor, pasteId);
+            } else if (option === "useDefaultFont") {
+              resetFontFamilyInPasteBatch(currentEditor, pasteId);
+            } else {
+              resetFontSizeInPasteBatch(currentEditor, pasteId);
+            }
+          }
+
+          ensureBlockLines(currentEditor);
+          syncLineEmptyState(currentEditor);
+          syncEditorContent();
+          recordHistorySnapshot();
+          scheduleAutoSave();
+        });
+
+        return next;
+      });
+    },
+    [recordHistorySnapshot, scheduleAutoSave, syncEditorContent],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (pasteFormatPromptTimerRef.current !== null) {
+        window.clearTimeout(pasteFormatPromptTimerRef.current);
+      }
+    };
+  }, []);
+
   const restoreSavedLinkSelection = useCallback(() => {
     const editor = editorRef.current;
     const savedRange = savedLinkSelectionRef.current;
@@ -833,7 +985,6 @@ export function TaskDetailsPanel({
       isApplyingHistoryRef.current = true;
       editor.innerHTML = html;
       ensureBlockLines(editor);
-      normalizeEditorFonts(editor);
       historyIndexRef.current = index;
       previousTextRef.current = editor.textContent ?? "";
       syncEditorContent();
@@ -879,7 +1030,6 @@ export function TaskDetailsPanel({
     editor.innerHTML = detailsRef.current;
     ensureBlockLines(editor);
     ensureTitleLine(editor);
-    normalizeEditorFonts(editor);
     syncLineEmptyState(editor);
     previousTextRef.current = editor.textContent ?? "";
     hydratedTaskIdRef.current = task.id;
@@ -1160,7 +1310,6 @@ export function TaskDetailsPanel({
       splitBlockLinesOnBreaks(editor);
       ensureTitleLine(editor);
       normalizeLinks(editor);
-      normalizeEditorFonts(editor);
       syncLineEmptyState(editor);
     }
 
@@ -1218,7 +1367,6 @@ export function TaskDetailsPanel({
 
       editor.focus();
       document.execCommand("insertText", false, text);
-      normalizeEditorFonts(editor);
       syncEditorContent();
       recordHistorySnapshot();
       scheduleAutoSave();
@@ -1233,21 +1381,27 @@ export function TaskDetailsPanel({
       return;
     }
 
-    requestAnimationFrame(() => {
-      const currentEditor = editorRef.current;
-      if (!currentEditor) return;
+    const html = event.clipboardData.getData("text/html");
+    const plainText = event.clipboardData.getData("text/plain");
 
-      normalizeEditorFonts(currentEditor);
-      ensureBlockLines(currentEditor);
-      splitBlockLinesOnBreaks(currentEditor);
-      ensureTitleLine(currentEditor);
-      normalizeLinks(currentEditor);
-      syncLineEmptyState(currentEditor);
-      syncEditorContent();
-      syncTitleToTaskList();
-      recordHistorySnapshot();
-      scheduleAutoSave();
-      updateLineControls();
+    if (html && plainText && pastedHtmlHasFormatting(html)) {
+      event.preventDefault();
+
+      const pasteId = crypto.randomUUID();
+      const fragment = preparePasteFragment(html, pasteId);
+
+      editor.focus();
+      insertPasteFragmentAtSelection(fragment);
+
+      requestAnimationFrame(() => {
+        finalizePasteEditorState();
+        showPasteFormatPrompt(pasteId);
+      });
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      finalizePasteEditorState();
     });
   }
 
@@ -1860,6 +2014,63 @@ export function TaskDetailsPanel({
           >
             {isImageDropActive && (
               <div className="pointer-events-none absolute inset-0 z-30 rounded-md border-2 border-dashed border-blue-400 bg-blue-50/40 dark:border-blue-500 dark:bg-blue-950/20" />
+            )}
+
+            {pasteFormatPrompt && (
+              <div
+                className="absolute z-40 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-zinc-200 bg-white/95 px-3 py-2 text-xs shadow-md backdrop-blur-sm dark:border-zinc-700 dark:bg-zinc-900/95"
+                style={{
+                  top: pasteFormatPrompt.top,
+                  left: pasteFormatPrompt.left,
+                }}
+                onMouseDown={(event) => event.preventDefault()}
+              >
+                <span className="font-medium text-zinc-500 dark:text-zinc-400">
+                  Pasted formatting
+                </span>
+                <label className="flex cursor-pointer items-center gap-1.5 text-zinc-700 dark:text-zinc-200">
+                  <input
+                    type="checkbox"
+                    className="size-3.5 rounded border-zinc-300 accent-zinc-900 dark:border-zinc-600 dark:accent-zinc-100"
+                    checked={pasteFormatPrompt.removeFormatting}
+                    onChange={(event) =>
+                      applyPasteFormatOption(
+                        "removeFormatting",
+                        event.target.checked,
+                      )
+                    }
+                  />
+                  Remove formatting
+                </label>
+                <label className="flex cursor-pointer items-center gap-1.5 text-zinc-700 dark:text-zinc-200">
+                  <input
+                    type="checkbox"
+                    className="size-3.5 rounded border-zinc-300 accent-zinc-900 dark:border-zinc-600 dark:accent-zinc-100"
+                    checked={pasteFormatPrompt.useDefaultFont}
+                    onChange={(event) =>
+                      applyPasteFormatOption(
+                        "useDefaultFont",
+                        event.target.checked,
+                      )
+                    }
+                  />
+                  Default font
+                </label>
+                <label className="flex cursor-pointer items-center gap-1.5 text-zinc-700 dark:text-zinc-200">
+                  <input
+                    type="checkbox"
+                    className="size-3.5 rounded border-zinc-300 accent-zinc-900 dark:border-zinc-600 dark:accent-zinc-100"
+                    checked={pasteFormatPrompt.useDefaultSize}
+                    onChange={(event) =>
+                      applyPasteFormatOption(
+                        "useDefaultSize",
+                        event.target.checked,
+                      )
+                    }
+                  />
+                  Default size
+                </label>
+              </div>
             )}
 
             <div

@@ -1,27 +1,32 @@
-export const PRIORITY_TAG_CATEGORY = "priority";
-export const LABEL_TAG_CATEGORY = "label";
+import {
+  isTaskPriorityLevel,
+  type TaskPriorityLevel,
+  TASK_PRIORITY_OPTIONS,
+} from "./task-priority";
 
-export function labelTagSlug(label: string) {
+export const PRIORITY_TAG_CATEGORY = "priority";
+export const LABEL_CATEGORY = "label";
+
+export function labelSlug(label: string) {
   const normalized = label
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "");
 
-  return normalized || `tag-${Date.now()}`;
+  return normalized || `label-${Date.now()}`;
 }
 
-export const PRIORITY_TAGS = [
-  { slug: "priority-1", label: "Priority 1", level: 1 },
-  { slug: "priority-2", label: "Priority 2", level: 2 },
-  { slug: "priority-3", label: "Priority 3", level: 3 },
-  { slug: "priority-4", label: "Priority 4", level: 4 },
-] as const;
+export const PRIORITY_TAGS = TASK_PRIORITY_OPTIONS.map((option) => ({
+  slug: `priority-${option.level}`,
+  label: option.label,
+  level: option.level,
+}));
 
-export type PriorityLevel = (typeof PRIORITY_TAGS)[number]["level"];
+export type PriorityLevel = TaskPriorityLevel;
 
 export function isPriorityLevel(value: number): value is PriorityLevel {
-  return value === 1 || value === 2 || value === 3 || value === 4;
+  return isTaskPriorityLevel(value);
 }
 
 export function normalizePriority(value: number | null): PriorityLevel | null {
@@ -59,11 +64,11 @@ type LabelTagRecord = {
   };
 };
 
-export function getLabelTagsFromTaskTags(
+export function getLabelsFromTaskTags(
   tags: LabelTagRecord[],
 ): { id: string; label: string }[] {
   return tags
-    .filter((entry) => entry.tag.category === LABEL_TAG_CATEGORY)
+    .filter((entry) => entry.tag.category === LABEL_CATEGORY)
     .map((entry) => ({
       id: entry.tag.id,
       label: entry.tag.label,

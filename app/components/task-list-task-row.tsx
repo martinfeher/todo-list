@@ -9,11 +9,12 @@ import {
   TaskRowContextMenu,
   type TaskRowContextMenuView,
 } from "./task-row-context-menu";
-import type { LabelTag } from "./task-tag-selector";
-import { TaskTagPills } from "./task-tag-pills";
+import type { Label } from "./task-label-selector";
+import { TaskLabelPills } from "./task-label-pills";
 import { ThreeDotsIcon } from "./three-dots-icon";
 import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
+import { getTaskPriorityColor } from "@/lib/task-priority";
 import { SUBTASK_INDENT_PX, SUBTASK_ICON_INDENT_PX } from "@/lib/task-subtasks";
 
 type TaskListTaskRowProps = {
@@ -27,16 +28,15 @@ type TaskListTaskRowProps = {
   showDragHandle: boolean;
   openDatePickerTaskId: string | null;
   openMenuTaskId: string | null;
-  openPriorityMenuTaskId: string | null;
-  openTagMenuTaskId: string | null;
+  openLabelMenuTaskId: string | null;
   openMoveMenuTaskId: string | null;
   lists: TodoList[];
   currentListId: string | null;
   moveQuery: string;
-  availableTags: LabelTag[];
-  assignedTagIds: string[];
-  tagQuery: string;
-  isTagSubmitting: boolean;
+  availableLabels: Label[];
+  assignedLabelIds: string[];
+  labelQuery: string;
+  isLabelSubmitting: boolean;
   taskDateMenuRef: RefObject<HTMLDivElement | null>;
   taskContextMenuRef: RefObject<HTMLDivElement | null>;
   dueDateLabel: string | null;
@@ -62,35 +62,32 @@ type TaskListTaskRowProps = {
   onToggleTaskMenu: (taskId: string) => void;
   onStartTitleEdit: (task: TaskListItem) => void;
   onToggleTaskPinned: (task: TaskListItem) => void;
-  onOpenPriorityMenu: (taskId: string) => void;
-  onOpenTagMenu: (taskId: string) => void;
+  onOpenLabelMenu: (taskId: string) => void;
   onOpenMoveMenu: (taskId: string) => void;
   onMoveQueryChange: (value: string) => void;
   onMoveTaskToList: (taskId: string, targetListId: string) => void;
-  onTagQueryChange: (value: string) => void;
-  onToggleTag: (tagId: string) => void;
-  onCreateTag: (label: string) => void;
+  onLabelQueryChange: (value: string) => void;
+  onToggleLabel: (labelId: string) => void;
+  onCreateLabel: (label: string) => void;
   onClearTaskDueDate: (taskId: string) => void;
   onSelectTaskPriority: (taskId: string, priority: number) => void;
   onClearTaskPriority: (taskId: string) => void;
-  onConfirmTags: () => void;
+  onConfirmLabels: () => void;
   onCloseTaskMenu: () => void;
   hasDueDateActions: boolean;
   hasPriorityActions: boolean;
   hasPinActions: boolean;
-  hasTagActions: boolean;
+  hasLabelActions: boolean;
   hasMoveActions: boolean;
 };
 
 function getRowMenuView(
   taskId: string,
   openMenuTaskId: string | null,
-  openPriorityMenuTaskId: string | null,
-  openTagMenuTaskId: string | null,
+  openLabelMenuTaskId: string | null,
   openMoveMenuTaskId: string | null,
 ): TaskRowContextMenuView | null {
-  if (openPriorityMenuTaskId === taskId) return "priority";
-  if (openTagMenuTaskId === taskId) return "tag";
+  if (openLabelMenuTaskId === taskId) return "label";
   if (openMoveMenuTaskId === taskId) return "moveTo";
   if (openMenuTaskId === taskId) return "main";
   return null;
@@ -107,16 +104,15 @@ export function TaskListTaskRow({
   showDragHandle,
   openDatePickerTaskId,
   openMenuTaskId,
-  openPriorityMenuTaskId,
-  openTagMenuTaskId,
+  openLabelMenuTaskId,
   openMoveMenuTaskId,
   lists,
   currentListId,
   moveQuery,
-  availableTags,
-  assignedTagIds,
-  tagQuery,
-  isTagSubmitting,
+  availableLabels,
+  assignedLabelIds,
+  labelQuery,
+  isLabelSubmitting,
   taskDateMenuRef,
   taskContextMenuRef,
   dueDateLabel,
@@ -133,37 +129,40 @@ export function TaskListTaskRow({
   onToggleTaskMenu,
   onStartTitleEdit,
   onToggleTaskPinned,
-  onOpenPriorityMenu,
-  onOpenTagMenu,
+  onOpenLabelMenu,
   onOpenMoveMenu,
   onMoveQueryChange,
   onMoveTaskToList,
-  onTagQueryChange,
-  onToggleTag,
-  onCreateTag,
+  onLabelQueryChange,
+  onToggleLabel,
+  onCreateLabel,
   onClearTaskDueDate,
   onSelectTaskPriority,
   onClearTaskPriority,
-  onConfirmTags,
+  onConfirmLabels,
   onCloseTaskMenu,
   hasDueDateActions,
   hasPriorityActions,
   hasPinActions,
-  hasTagActions,
+  hasLabelActions,
   hasMoveActions,
 }: TaskListTaskRowProps) {
   const rowMenuView = getRowMenuView(
     task.id,
     openMenuTaskId,
-    openPriorityMenuTaskId,
-    openTagMenuTaskId,
+    openLabelMenuTaskId,
     openMoveMenuTaskId,
   );
   const isRowMenuOpen =
     !isCompleting &&
     (openDatePickerTaskId === task.id || rowMenuView !== null);
 
-  const rowPaddingLeft = 8 + (depth * SUBTASK_INDENT_PX);
+  const priorityColor = getTaskPriorityColor(task.priority);
+  const basePaddingLeft = priorityColor ? 5 : 8;
+  const rowPaddingLeft = basePaddingLeft + depth * SUBTASK_INDENT_PX;
+  const priorityBorderStyle = priorityColor
+    ? { borderLeftWidth: 3, borderLeftStyle: "solid" as const, borderLeftColor: priorityColor }
+    : undefined;
 
   if (isCompleting) {
     return (
@@ -191,12 +190,10 @@ export function TaskListTaskRow({
           ? (event) => onTaskDragStart(event, task.id)
           : undefined
       }
-      className={`group flex min-h-[35px] items-center gap-2 border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 ${
-        showDragHandle
-          ? "cursor-grab touch-none active:cursor-grabbing"
-          : "cursor-pointer"
+      className={`group flex min-h-[35px] items-center gap-2 border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 cursor-pointer ${
+        showDragHandle ? "touch-none" : ""
       }`}
-      style={{ paddingLeft: rowPaddingLeft }}
+      style={{ paddingLeft: rowPaddingLeft, ...priorityBorderStyle }}
     >
       {showDragHandle ? (
         <span
@@ -240,8 +237,8 @@ export function TaskListTaskRow({
       )}
 
       <div className="relative flex h-7 min-w-0 shrink-0 items-center justify-end gap-1.5">
-        {task.tags.length > 0 ? (
-          <TaskTagPills tags={task.tags} className="max-w-[140px]" />
+        {task.labels.length > 0 ? (
+          <TaskLabelPills labels={task.labels} className="max-w-[140px]" />
         ) : null}
 
         {dueDateLabel ? (
@@ -256,7 +253,7 @@ export function TaskListTaskRow({
 
         <div
           className={`flex items-center gap-0.5 transition-opacity ${
-            dueDateLabel || task.tags.length > 0 ? "shrink-0" : ""
+            dueDateLabel || task.labels.length > 0 ? "shrink-0" : ""
           } ${
             isRowMenuOpen
               ? "pointer-events-auto opacity-100"
@@ -333,19 +330,18 @@ export function TaskListTaskRow({
                   lists={lists}
                   currentListId={currentListId ?? task.listId ?? null}
                   moveQuery={moveQuery}
-                  availableTags={availableTags}
-                  assignedTagIds={assignedTagIds}
-                  tagQuery={tagQuery}
-                  isTagSubmitting={isTagSubmitting}
+                  availableLabels={availableLabels}
+                  assignedLabelIds={assignedLabelIds}
+                  labelQuery={labelQuery}
+                  isLabelSubmitting={isLabelSubmitting}
                   onMoveQueryChange={onMoveQueryChange}
-                  onTagQueryChange={onTagQueryChange}
-                  onToggleTagSelection={onToggleTag}
-                  onCreateTag={onCreateTag}
+                  onLabelQueryChange={onLabelQueryChange}
+                  onToggleLabelSelection={onToggleLabel}
+                  onCreateLabel={onCreateLabel}
                   onClose={onCloseTaskMenu}
                   onStartTitleEdit={() => onStartTitleEdit(task)}
                   onToggleTaskPinned={() => onToggleTaskPinned(task)}
-                  onOpenPriorityMenu={() => onOpenPriorityMenu(task.id)}
-                  onOpenTagMenu={() => onOpenTagMenu(task.id)}
+                  onOpenLabelMenu={() => onOpenLabelMenu(task.id)}
                   onOpenMoveMenu={() => onOpenMoveMenu(task.id)}
                   onMoveTaskToList={(targetListId) =>
                     onMoveTaskToList(task.id, targetListId)
@@ -355,11 +351,11 @@ export function TaskListTaskRow({
                     onSelectTaskPriority(task.id, priority)
                   }
                   onClearTaskPriority={() => onClearTaskPriority(task.id)}
-                  onConfirmTags={onConfirmTags}
+                  onConfirmLabels={onConfirmLabels}
                   hasDueDateActions={hasDueDateActions}
                   hasPriorityActions={hasPriorityActions}
                   hasPinActions={hasPinActions}
-                  hasTagActions={hasTagActions}
+                  hasLabelActions={hasLabelActions}
                   hasMoveActions={hasMoveActions}
                 />
               </div>

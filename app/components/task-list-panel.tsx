@@ -4,9 +4,9 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { BiSortAlt2 } from "react-icons/bi";
 import { LuPlus } from "react-icons/lu";
 import { PiArrowBendDownRight } from "react-icons/pi";
-import { createLabelTag, getLabelTags } from "@/app/actions/todo";
+import { createLabel, getLabels } from "@/app/actions/todo";
 import { TaskListTaskRow } from "./task-list-task-row";
-import type { LabelTag } from "./task-tag-selector";
+import type { Label } from "./task-label-selector";
 import {
   TaskRowContextMenu,
   type TaskRowContextMenuView,
@@ -171,7 +171,7 @@ type TaskListPanelProps = {
   embedded?: boolean;
   showHeader?: boolean;
   showAddTask?: boolean;
-  isTagFilter?: boolean;
+  isLabelFilter?: boolean;
   listId?: string | null;
   onAddTask: (name: string) => void;
   onToggleTask: (taskId: string) => void;
@@ -188,12 +188,12 @@ type TaskListPanelProps = {
   onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
   onSetTaskPriority?: (taskId: string, priority: number | null) => void;
   onSetTaskPinned?: (taskId: string, pinned: boolean) => void;
-  onToggleTaskLabelTag?: (
+  onToggleTaskLabel?: (
     taskId: string,
-    tagId: string,
+    labelId: string,
     assigned: boolean,
   ) => Promise<{ id: string; label: string }[]>;
-  onLabelTagsChanged?: () => void;
+  onLabelsChanged?: () => void;
   onMoveTaskToList?: (
     taskId: string,
     sourceListId: string,
@@ -211,7 +211,7 @@ export function TaskListPanel({
   embedded = false,
   showHeader = true,
   showAddTask = false,
-  isTagFilter = false,
+  isLabelFilter = false,
   listId = null,
   onAddTask,
   onToggleTask,
@@ -223,8 +223,8 @@ export function TaskListPanel({
   onSetTaskDueTime,
   onSetTaskPriority,
   onSetTaskPinned,
-  onToggleTaskLabelTag,
-  onLabelTagsChanged,
+  onToggleTaskLabel,
+  onLabelsChanged,
   onMoveTaskToList,
 }: TaskListPanelProps) {
   const [newTaskName, setNewTaskName] = useState("");
@@ -237,60 +237,57 @@ export function TaskListPanel({
     null,
   );
   const [openMenuTaskId, setOpenMenuTaskId] = useState<string | null>(null);
-  const [openPriorityMenuTaskId, setOpenPriorityMenuTaskId] = useState<
-    string | null
-  >(null);
-  const [openTagMenuTaskId, setOpenTagMenuTaskId] = useState<string | null>(
+  const [openLabelMenuTaskId, setOpenLabelMenuTaskId] = useState<string | null>(
     null,
   );
   const [openMoveMenuTaskId, setOpenMoveMenuTaskId] = useState<string | null>(
     null,
   );
   const [moveQuery, setMoveQuery] = useState("");
-  const [availableTags, setAvailableTags] = useState<LabelTag[]>([]);
-  const [assignedTagIds, setAssignedTagIds] = useState<string[]>([]);
-  const [tagQuery, setTagQuery] = useState("");
-  const [isTagSubmitting, setIsTagSubmitting] = useState(false);
+  const [availableLabels, setAvailableLabels] = useState<Label[]>([]);
+  const [assignedLabelIds, setAssignedLabelIds] = useState<string[]>([]);
+  const [labelQuery, setLabelQuery] = useState("");
+  const [isLabelSubmitting, setIsLabelSubmitting] = useState(false);
   const [pointerContextMenu, setPointerContextMenu] =
     useState<PointerContextMenuState | null>(null);
   const [dropIndicator, setDropIndicator] = useState<DropIndicatorState | null>(
     null,
   );
 
-  const activeTagMenuTaskId =
-    openTagMenuTaskId ??
-    (pointerContextMenu?.view === "tag" ? pointerContextMenu.taskId : null);
+  const activeLabelMenuTaskId =
+    openLabelMenuTaskId ??
+    (pointerContextMenu?.view === "label" ? pointerContextMenu.taskId : null);
 
   useEffect(() => {
-    if (!activeTagMenuTaskId) return;
+    if (!activeLabelMenuTaskId) return;
 
     let cancelled = false;
 
-    void getLabelTags()
+    void getLabels()
       .then((tags) => {
         if (!cancelled) {
-          setAvailableTags(tags);
+          setAvailableLabels(tags);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setAvailableTags([]);
+          setAvailableLabels([]);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [activeTagMenuTaskId]);
+  }, [activeLabelMenuTaskId]);
 
   useEffect(() => {
-    if (!activeTagMenuTaskId) return;
+    if (!activeLabelMenuTaskId) return;
 
-    const task = orderedTasks.find((item) => item.id === activeTagMenuTaskId);
+    const task = orderedTasks.find((item) => item.id === activeLabelMenuTaskId);
     if (!task) return;
 
-    setAssignedTagIds(task.tags.map((tag) => tag.id));
-  }, [activeTagMenuTaskId, orderedTasks]);
+    setAssignedLabelIds(task.labels.map((tag) => tag.id));
+  }, [activeLabelMenuTaskId, orderedTasks]);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const newTaskInputRef = useRef<HTMLInputElement>(null);
   const keepAddTaskOpenRef = useRef(false);
@@ -360,10 +357,9 @@ export function TaskListPanel({
     setTitleDraft("");
     setOpenDatePickerTaskId(null);
     setOpenMenuTaskId(null);
-    setOpenPriorityMenuTaskId(null);
-    setOpenTagMenuTaskId(null);
+    setOpenLabelMenuTaskId(null);
     setOpenMoveMenuTaskId(null);
-    resetTagMenuState();
+    resetLabelMenuState();
     resetMoveMenuState();
     setPointerContextMenu(null);
     setIsAddingTask(false);
@@ -380,10 +376,9 @@ export function TaskListPanel({
 
       setOpenDatePickerTaskId(null);
       setOpenMenuTaskId(null);
-      setOpenPriorityMenuTaskId(null);
-      setOpenTagMenuTaskId(null);
+      setOpenLabelMenuTaskId(null);
       setOpenMoveMenuTaskId(null);
-      resetTagMenuState();
+      resetLabelMenuState();
       resetMoveMenuState();
       setPointerContextMenu(null);
     }
@@ -391,8 +386,7 @@ export function TaskListPanel({
     if (
       !openDatePickerTaskId &&
       !openMenuTaskId &&
-      !openPriorityMenuTaskId &&
-      !openTagMenuTaskId &&
+      !openLabelMenuTaskId &&
       !openMoveMenuTaskId &&
       !pointerContextMenu
     ) {
@@ -406,8 +400,7 @@ export function TaskListPanel({
   }, [
     openDatePickerTaskId,
     openMenuTaskId,
-    openPriorityMenuTaskId,
-    openTagMenuTaskId,
+    openLabelMenuTaskId,
     openMoveMenuTaskId,
     pointerContextMenu,
   ]);
@@ -417,18 +410,16 @@ export function TaskListPanel({
       if (event.key !== "Escape") return;
 
       setOpenMenuTaskId(null);
-      setOpenPriorityMenuTaskId(null);
-      setOpenTagMenuTaskId(null);
+      setOpenLabelMenuTaskId(null);
       setOpenMoveMenuTaskId(null);
-      resetTagMenuState();
+      resetLabelMenuState();
       resetMoveMenuState();
       setPointerContextMenu(null);
     }
 
     if (
       !openMenuTaskId &&
-      !openPriorityMenuTaskId &&
-      !openTagMenuTaskId &&
+      !openLabelMenuTaskId &&
       !openMoveMenuTaskId &&
       !pointerContextMenu
     ) {
@@ -441,8 +432,7 @@ export function TaskListPanel({
     };
   }, [
     openMenuTaskId,
-    openPriorityMenuTaskId,
-    openTagMenuTaskId,
+    openLabelMenuTaskId,
     openMoveMenuTaskId,
     pointerContextMenu,
   ]);
@@ -572,10 +562,10 @@ export function TaskListPanel({
     setIsSortMenuOpen(false);
   }
 
-  function resetTagMenuState() {
-    setAssignedTagIds([]);
-    setTagQuery("");
-    setIsTagSubmitting(false);
+  function resetLabelMenuState() {
+    setAssignedLabelIds([]);
+    setLabelQuery("");
+    setIsLabelSubmitting(false);
   }
 
   function resetMoveMenuState() {
@@ -586,19 +576,18 @@ export function TaskListPanel({
     return task.listId ?? listId ?? null;
   }
 
-  function initTagMenuForTask(taskId: string) {
+  function initLabelMenuForTask(taskId: string) {
     const task = orderedTasks.find((item) => item.id === taskId);
-    setAssignedTagIds(task?.tags.map((tag) => tag.id) ?? []);
-    setTagQuery("");
-    setIsTagSubmitting(false);
+    setAssignedLabelIds(task?.labels.map((item) => item.id) ?? []);
+    setLabelQuery("");
+    setIsLabelSubmitting(false);
   }
 
   function closeTaskMenus() {
     setOpenMenuTaskId(null);
-    setOpenPriorityMenuTaskId(null);
-    setOpenTagMenuTaskId(null);
+    setOpenLabelMenuTaskId(null);
     setOpenMoveMenuTaskId(null);
-    resetTagMenuState();
+    resetLabelMenuState();
     resetMoveMenuState();
     setPointerContextMenu(null);
   }
@@ -611,49 +600,31 @@ export function TaskListPanel({
   function toggleTaskMenu(taskId: string) {
     setOpenDatePickerTaskId(null);
     setPointerContextMenu(null);
-    setOpenPriorityMenuTaskId(null);
-    setOpenTagMenuTaskId(null);
+    setOpenLabelMenuTaskId(null);
     setOpenMoveMenuTaskId(null);
-    resetTagMenuState();
+    resetLabelMenuState();
     resetMoveMenuState();
     setOpenMenuTaskId((current) => (current === taskId ? null : taskId));
   }
 
-  function openPriorityMenu(taskId: string) {
+  function openLabelMenu(taskId: string) {
     setOpenMenuTaskId(null);
-    setOpenTagMenuTaskId(null);
     setOpenMoveMenuTaskId(null);
-    resetTagMenuState();
     resetMoveMenuState();
+    initLabelMenuForTask(taskId);
     if (pointerContextMenu?.taskId === taskId) {
-      setPointerContextMenu({ ...pointerContextMenu, view: "priority" });
+      setPointerContextMenu({ ...pointerContextMenu, view: "label" });
       return;
     }
 
     setPointerContextMenu(null);
-    setOpenPriorityMenuTaskId(taskId);
-  }
-
-  function openTagMenu(taskId: string) {
-    setOpenMenuTaskId(null);
-    setOpenPriorityMenuTaskId(null);
-    setOpenMoveMenuTaskId(null);
-    resetMoveMenuState();
-    initTagMenuForTask(taskId);
-    if (pointerContextMenu?.taskId === taskId) {
-      setPointerContextMenu({ ...pointerContextMenu, view: "tag" });
-      return;
-    }
-
-    setPointerContextMenu(null);
-    setOpenTagMenuTaskId(taskId);
+    setOpenLabelMenuTaskId(taskId);
   }
 
   function openMoveMenu(taskId: string) {
     setOpenMenuTaskId(null);
-    setOpenPriorityMenuTaskId(null);
-    setOpenTagMenuTaskId(null);
-    resetTagMenuState();
+    setOpenLabelMenuTaskId(null);
+    resetLabelMenuState();
     setMoveQuery("");
     if (pointerContextMenu?.taskId === taskId) {
       setPointerContextMenu({ ...pointerContextMenu, view: "moveTo" });
@@ -677,31 +648,31 @@ export function TaskListPanel({
     closeTaskMenus();
   }
 
-  async function handleToggleTag(taskId: string, tagId: string) {
-    if (!onToggleTaskLabelTag) return;
+  async function handleToggleLabel(taskId: string, labelId: string) {
+    if (!onToggleTaskLabel) return;
 
-    const isAssigned = assignedTagIds.includes(tagId);
-    setIsTagSubmitting(true);
+    const isAssigned = assignedLabelIds.includes(labelId);
+    setIsLabelSubmitting(true);
 
     try {
-      const updatedTags = await onToggleTaskLabelTag(taskId, tagId, !isAssigned);
-      setAssignedTagIds(updatedTags.map((tag) => tag.id));
+      const updatedTags = await onToggleTaskLabel(taskId, labelId, !isAssigned);
+      setAssignedLabelIds(updatedTags.map((tag) => tag.id));
     } catch {
       return;
     } finally {
-      setIsTagSubmitting(false);
+      setIsLabelSubmitting(false);
     }
   }
 
-  async function handleCreateTag(taskId: string, label: string) {
+  async function handleCreateLabel(taskId: string, label: string) {
     const trimmed = label.trim();
     if (!trimmed) return;
 
-    setIsTagSubmitting(true);
+    setIsLabelSubmitting(true);
 
     try {
-      const tag = await createLabelTag(trimmed);
-      setAvailableTags((current) => {
+      const tag = await createLabel(trimmed);
+      setAvailableLabels((current) => {
         if (current.some((item) => item.id === tag.id)) {
           return current;
         }
@@ -711,25 +682,25 @@ export function TaskListPanel({
         );
       });
 
-      if (onToggleTaskLabelTag) {
-        const updatedTags = await onToggleTaskLabelTag(taskId, tag.id, true);
-        setAssignedTagIds(updatedTags.map((item) => item.id));
+      if (onToggleTaskLabel) {
+        const updatedTags = await onToggleTaskLabel(taskId, tag.id, true);
+        setAssignedLabelIds(updatedTags.map((item) => item.id));
       } else {
-        setAssignedTagIds((current) =>
+        setAssignedLabelIds((current) =>
           current.includes(tag.id) ? current : [...current, tag.id],
         );
       }
 
-      setTagQuery("");
-      onLabelTagsChanged?.();
+      setLabelQuery("");
+      onLabelsChanged?.();
     } catch {
       return;
     } finally {
-      setIsTagSubmitting(false);
+      setIsLabelSubmitting(false);
     }
   }
 
-  function handleConfirmTags() {
+  function handleConfirmLabels() {
     closeTaskMenus();
   }
 
@@ -772,10 +743,9 @@ export function TaskListPanel({
     onSelectTask(task.id);
     setOpenDatePickerTaskId(null);
     setOpenMenuTaskId(null);
-    setOpenPriorityMenuTaskId(null);
-    setOpenTagMenuTaskId(null);
+    setOpenLabelMenuTaskId(null);
     setOpenMoveMenuTaskId(null);
-    resetTagMenuState();
+    resetLabelMenuState();
     resetMoveMenuState();
     setPointerContextMenu({
       taskId: task.id,
@@ -874,7 +844,8 @@ export function TaskListPanel({
 
     sourceRow.classList.add("opacity-50");
     sourceRow.setPointerCapture(pointerId);
-    document.body.style.cursor = "grabbing";
+    sourceRow.style.cursor = "move";
+    document.body.style.cursor = "move";
     document.addEventListener("pointermove", handleDragMove);
     document.addEventListener("pointerup", handleDragEnd);
     document.addEventListener("pointercancel", handleDragEnd);
@@ -894,6 +865,7 @@ export function TaskListPanel({
         dragState.captureTarget.releasePointerCapture(dragState.pointerId);
       }
       dragState.sourceRow.classList.remove("opacity-50");
+      dragState.sourceRow.style.cursor = "";
     }
 
     setDropIndicator(null);
@@ -982,6 +954,9 @@ export function TaskListPanel({
     const pointerId = event.pointerId;
     let dragStarted = false;
 
+    dragRow.style.cursor = "move";
+    document.body.style.cursor = "move";
+
     function clearPendingListeners() {
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", onPointerUp);
@@ -1014,6 +989,10 @@ export function TaskListPanel({
     function onPointerUp(upEvent: PointerEvent) {
       if (upEvent.pointerId !== pointerId) return;
       clearPendingListeners();
+      if (!dragStarted) {
+        dragRow.style.cursor = "";
+        document.body.style.cursor = "";
+      }
     }
 
     document.addEventListener("pointermove", onPointerMove);
@@ -1025,7 +1004,7 @@ export function TaskListPanel({
     taskItems: Array<TaskListItem & { depth?: number }>,
     section: "pinned" | "unpinned",
   ) {
-    const hasTagActions = Boolean(onToggleTaskLabelTag);
+    const hasLabelActions = Boolean(onToggleTaskLabel);
     const hasMoveActions = Boolean(onMoveTaskToList) && lists.length > 1;
 
     return taskItems.flatMap((task, index) => {
@@ -1050,16 +1029,15 @@ export function TaskListPanel({
           showDragHandle={canReorder}
           openDatePickerTaskId={openDatePickerTaskId}
           openMenuTaskId={openMenuTaskId}
-          openPriorityMenuTaskId={openPriorityMenuTaskId}
-          openTagMenuTaskId={openTagMenuTaskId}
+          openLabelMenuTaskId={openLabelMenuTaskId}
           openMoveMenuTaskId={openMoveMenuTaskId}
           lists={lists}
           currentListId={resolveTaskListId(task)}
           moveQuery={moveQuery}
-          availableTags={availableTags}
-          assignedTagIds={assignedTagIds}
-          tagQuery={tagQuery}
-          isTagSubmitting={isTagSubmitting}
+          availableLabels={availableLabels}
+          assignedLabelIds={assignedLabelIds}
+          labelQuery={labelQuery}
+          isLabelSubmitting={isLabelSubmitting}
           taskDateMenuRef={taskDateMenuRef}
           taskContextMenuRef={taskContextMenuRef}
           dueDateLabel={formatTaskDueDateLabel(task.dueDate)}
@@ -1084,23 +1062,22 @@ export function TaskListPanel({
           onToggleTaskMenu={toggleTaskMenu}
           onStartTitleEdit={startTitleEdit}
           onToggleTaskPinned={handleToggleTaskPinned}
-          onOpenPriorityMenu={openPriorityMenu}
-          onOpenTagMenu={openTagMenu}
+          onOpenLabelMenu={openLabelMenu}
           onOpenMoveMenu={openMoveMenu}
           onMoveQueryChange={setMoveQuery}
           onMoveTaskToList={handleMoveTaskToList}
-          onTagQueryChange={setTagQuery}
-          onToggleTag={(tagId) => handleToggleTag(task.id, tagId)}
-          onCreateTag={(label) => handleCreateTag(task.id, label)}
+          onLabelQueryChange={setLabelQuery}
+          onToggleLabel={(labelId) => handleToggleLabel(task.id, labelId)}
+          onCreateLabel={(label) => handleCreateLabel(task.id, label)}
           onClearTaskDueDate={handleClearTaskDueDate}
           onSelectTaskPriority={handleSelectTaskPriority}
           onClearTaskPriority={handleClearTaskPriority}
-          onConfirmTags={handleConfirmTags}
+          onConfirmLabels={handleConfirmLabels}
           onCloseTaskMenu={closeTaskMenus}
           hasDueDateActions={Boolean(onSetTaskDueDate)}
           hasPriorityActions={Boolean(onSetTaskPriority)}
           hasPinActions={Boolean(onSetTaskPinned)}
-          hasTagActions={hasTagActions}
+          hasLabelActions={hasLabelActions}
           hasMoveActions={hasMoveActions}
         />
       );
@@ -1138,14 +1115,14 @@ export function TaskListPanel({
       {title ? (
         <div className="flex flex-col">
           {showHeader && (
-            <header className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <header className="border-b border-zinc-200 pl-[32px] pr-4 py-3 dark:border-zinc-800">
               <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
                 {title}
               </h1>
             </header>
           )}
 
-          <div className="flex items-center justify-between gap-2 px-4 py-3">
+          <div className="flex items-center justify-between gap-2 pl-[31px] pr-4 py-3">
             {showAddTask ? (
               isAddingTask ? (
                 <form onSubmit={handleSubmit} className="min-w-0 flex-1">
@@ -1154,9 +1131,11 @@ export function TaskListPanel({
                     type="text"
                     value={newTaskName}
                     onChange={(event) => setNewTaskName(event.target.value)}
-                    placeholder={`+ Add Task to - ${title}`}
-                    aria-label={`+ Add Task to - ${title}`}
-                    className="h-[35px] w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 max-w-[190px] outline-none focus:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-zinc-500"
+                    placeholder={`+ Add Task`}
+                    // placeholder={`+ Add Task to - ${title}`}
+                    aria-label={`+ Add Task`}
+                    // aria-label={`+ Add Task to - ${title}`}
+                    className="h-[34px] w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 max-w-[190px] outline-none focus:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:focus:border-zinc-500"
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
                         event.preventDefault();
@@ -1264,15 +1243,15 @@ export function TaskListPanel({
             )}
 
             {listTasks.length === 0 && pinnedVisibleTasks.length === 0 ? (
-              <li className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">
+              <li className="pl-[33px] pr-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">
                 {title === "Today"
                   ? "No tasks for today"
                   : title === "Next 7 days"
                     ? "No tasks in the next 7 days"
                     : title === "Calendar"
                       ? "No scheduled tasks"
-                      : isTagFilter
-                        ? "No tasks with this tag"
+                      : isLabelFilter
+                        ? "No tasks with this label"
                         : "No tasks"}
               </li>
             ) : (
@@ -1299,25 +1278,24 @@ export function TaskListPanel({
             lists={lists}
             currentListId={resolveTaskListId(pointerMenuTask)}
             moveQuery={moveQuery}
-            availableTags={availableTags}
-            assignedTagIds={assignedTagIds}
-            tagQuery={tagQuery}
-            isTagSubmitting={isTagSubmitting}
+            availableLabels={availableLabels}
+            assignedLabelIds={assignedLabelIds}
+            labelQuery={labelQuery}
+            isLabelSubmitting={isLabelSubmitting}
             fixedPosition={{
               x: pointerContextMenu.x,
               y: pointerContextMenu.y,
             }}
             onMoveQueryChange={setMoveQuery}
-            onTagQueryChange={setTagQuery}
-            onToggleTagSelection={(tagId) =>
-              handleToggleTag(pointerMenuTask.id, tagId)
+            onLabelQueryChange={setLabelQuery}
+            onToggleLabelSelection={(labelId) =>
+              handleToggleLabel(pointerMenuTask.id, labelId)
             }
-            onCreateTag={(label) => handleCreateTag(pointerMenuTask.id, label)}
+            onCreateLabel={(label) => handleCreateLabel(pointerMenuTask.id, label)}
             onClose={closeTaskMenus}
             onStartTitleEdit={() => startTitleEdit(pointerMenuTask)}
             onToggleTaskPinned={() => handleToggleTaskPinned(pointerMenuTask)}
-            onOpenPriorityMenu={() => openPriorityMenu(pointerMenuTask.id)}
-            onOpenTagMenu={() => openTagMenu(pointerMenuTask.id)}
+            onOpenLabelMenu={() => openLabelMenu(pointerMenuTask.id)}
             onOpenMoveMenu={() => openMoveMenu(pointerMenuTask.id)}
             onMoveTaskToList={(targetListId) =>
               handleMoveTaskToList(pointerMenuTask.id, targetListId)
@@ -1331,11 +1309,11 @@ export function TaskListPanel({
             onClearTaskPriority={() =>
               handleClearTaskPriority(pointerMenuTask.id)
             }
-            onConfirmTags={handleConfirmTags}
+            onConfirmLabels={handleConfirmLabels}
             hasDueDateActions={Boolean(onSetTaskDueDate)}
             hasPriorityActions={Boolean(onSetTaskPriority)}
             hasPinActions={Boolean(onSetTaskPinned)}
-            hasTagActions={Boolean(onToggleTaskLabelTag)}
+            hasLabelActions={Boolean(onToggleTaskLabel)}
             hasMoveActions={Boolean(onMoveTaskToList) && lists.length > 1}
           />
         </div>

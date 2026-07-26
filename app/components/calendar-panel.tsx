@@ -20,12 +20,12 @@ type CalendarPanelProps = {
   onSetTaskDueDate?: (taskId: string, dateValue: string | null) => void;
   onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
   onSetTaskPriority?: (taskId: string, priority: number | null) => void;
-  onToggleTaskLabelTag?: (
+  onToggleTaskLabel?: (
     taskId: string,
-    tagId: string,
+    labelId: string,
     assigned: boolean,
   ) => Promise<{ id: string; label: string }[]>;
-  onLabelTagsChanged?: () => void;
+  onLabelsChanged?: () => void;
   onMoveTaskToList?: (
     taskId: string,
     sourceListId: string,
@@ -540,8 +540,8 @@ export function CalendarPanel({
   onSetTaskDueDate,
   onSetTaskDueTime,
   onSetTaskPriority,
-  onToggleTaskLabelTag,
-  onLabelTagsChanged,
+  onToggleTaskLabel,
+  onLabelsChanged,
   onMoveTaskToList,
 }: CalendarPanelProps) {
   const [activeTab, setActiveTab] = useState<CalendarTab>("calendar");
@@ -568,8 +568,8 @@ export function CalendarPanel({
           onSetTaskDueDate={onSetTaskDueDate}
           onSetTaskDueTime={onSetTaskDueTime}
           onSetTaskPriority={onSetTaskPriority}
-          onToggleTaskLabelTag={onToggleTaskLabelTag}
-          onLabelTagsChanged={onLabelTagsChanged}
+          onToggleTaskLabel={onToggleTaskLabel}
+          onLabelsChanged={onLabelsChanged}
           onMoveTaskToList={onMoveTaskToList}
         />
         </div>

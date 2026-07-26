@@ -2,11 +2,12 @@
 
 import { BiChevronRight } from "react-icons/bi";
 import { TaskMoveToSelector } from "./task-move-to-selector";
-import type { LabelTag } from "./task-tag-selector";
-import { TaskTagSelector } from "./task-tag-selector";
+import type { Label } from "./task-label-selector";
+import { TaskLabelSelector } from "./task-label-selector";
+import { TaskPrioritySelector } from "./task-priority-selector";
 import type { TaskListItem, TodoList } from "./todo-app";
 
-export type TaskRowContextMenuView = "main" | "priority" | "tag" | "moveTo";
+export type TaskRowContextMenuView = "main" | "label" | "moveTo";
 
 type TaskRowContextMenuProps = {
   task: TaskListItem;
@@ -14,30 +15,29 @@ type TaskRowContextMenuProps = {
   lists: TodoList[];
   currentListId: string | null;
   moveQuery: string;
-  availableTags: LabelTag[];
-  assignedTagIds: string[];
-  tagQuery: string;
-  isTagSubmitting?: boolean;
+  availableLabels: Label[];
+  assignedLabelIds: string[];
+  labelQuery: string;
+  isLabelSubmitting?: boolean;
   fixedPosition?: { x: number; y: number };
   onMoveQueryChange: (value: string) => void;
-  onTagQueryChange: (value: string) => void;
-  onToggleTagSelection: (tagId: string) => void;
-  onCreateTag: (label: string) => void;
+  onLabelQueryChange: (value: string) => void;
+  onToggleLabelSelection: (labelId: string) => void;
+  onCreateLabel: (label: string) => void;
   onClose: () => void;
   onStartTitleEdit: () => void;
   onToggleTaskPinned: () => void;
-  onOpenPriorityMenu: () => void;
-  onOpenTagMenu: () => void;
+  onOpenLabelMenu: () => void;
   onOpenMoveMenu: () => void;
   onMoveTaskToList: (listId: string) => void;
   onClearTaskDueDate: () => void;
   onSelectTaskPriority: (priority: number) => void;
   onClearTaskPriority: () => void;
-  onConfirmTags: () => void;
+  onConfirmLabels: () => void;
   hasDueDateActions: boolean;
   hasPriorityActions: boolean;
   hasPinActions: boolean;
-  hasTagActions: boolean;
+  hasLabelActions: boolean;
   hasMoveActions: boolean;
 };
 
@@ -53,15 +53,16 @@ function MainMenuItems({
   hasPinActions,
   hasPriorityActions,
   hasDueDateActions,
-  hasTagActions,
+  hasLabelActions,
   hasMoveActions,
   onClose,
   onStartTitleEdit,
   onToggleTaskPinned,
-  onOpenPriorityMenu,
-  onOpenTagMenu,
+  onOpenLabelMenu,
   onOpenMoveMenu,
   onClearTaskDueDate,
+  onSelectTaskPriority,
+  onClearTaskPriority,
 }: Pick<
   TaskRowContextMenuProps,
   | "task"
@@ -69,18 +70,22 @@ function MainMenuItems({
   | "hasPinActions"
   | "hasPriorityActions"
   | "hasDueDateActions"
-  | "hasTagActions"
+  | "hasLabelActions"
   | "hasMoveActions"
   | "onClose"
   | "onStartTitleEdit"
   | "onToggleTaskPinned"
-  | "onOpenPriorityMenu"
-  | "onOpenTagMenu"
+  | "onOpenLabelMenu"
   | "onOpenMoveMenu"
   | "onClearTaskDueDate"
+  | "onSelectTaskPriority"
+  | "onClearTaskPriority"
 >) {
   return (
-    <div role="menu" className={`w-36 ${menuClassName}`}>
+    <div
+      role="menu"
+      className={`${hasPriorityActions ? "w-[168px]" : "w-36"} ${menuClassName}`}
+    >
       <button
         type="button"
         role="menuitem"
@@ -107,17 +112,17 @@ function MainMenuItems({
         </button>
       ) : null}
       {hasPriorityActions ? (
-        <button
-          type="button"
-          role="menuitem"
-          className={menuItemClassName}
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenPriorityMenu();
+        <TaskPrioritySelector
+          selectedPriority={task.priority}
+          onSelectPriority={(priority) => {
+            onSelectTaskPriority(priority);
+            onClose();
           }}
-        >
-          Add priority
-        </button>
+          onClearPriority={() => {
+            onClearTaskPriority();
+            onClose();
+          }}
+        />
       ) : null}
       {hasMoveActions ? (
         <button
@@ -148,17 +153,17 @@ function MainMenuItems({
           Clear date
         </button>
       ) : null}
-      {hasTagActions ? (
+      {hasLabelActions ? (
         <button
           type="button"
           role="menuitem"
           className={menuItemClassName}
           onClick={(event) => {
             event.stopPropagation();
-            onOpenTagMenu();
+            onOpenLabelMenu();
           }}
         >
-          Add tag
+          Add label
         </button>
       ) : null}
     </div>
@@ -171,30 +176,29 @@ export function TaskRowContextMenu({
   lists,
   currentListId,
   moveQuery,
-  availableTags,
-  assignedTagIds,
-  tagQuery,
-  isTagSubmitting = false,
+  availableLabels,
+  assignedLabelIds,
+  labelQuery,
+  isLabelSubmitting = false,
   fixedPosition,
   onMoveQueryChange,
-  onTagQueryChange,
-  onToggleTagSelection,
-  onCreateTag,
+  onLabelQueryChange,
+  onToggleLabelSelection,
+  onCreateLabel,
   onClose,
   onStartTitleEdit,
   onToggleTaskPinned,
-  onOpenPriorityMenu,
-  onOpenTagMenu,
+  onOpenLabelMenu,
   onOpenMoveMenu,
   onMoveTaskToList,
   onClearTaskDueDate,
   onSelectTaskPriority,
   onClearTaskPriority,
-  onConfirmTags,
+  onConfirmLabels,
   hasDueDateActions,
   hasPriorityActions,
   hasPinActions,
-  hasTagActions,
+  hasLabelActions,
   hasMoveActions,
 }: TaskRowContextMenuProps) {
   const menu = (
@@ -206,15 +210,16 @@ export function TaskRowContextMenu({
           hasPinActions={hasPinActions}
           hasPriorityActions={hasPriorityActions}
           hasDueDateActions={hasDueDateActions}
-          hasTagActions={hasTagActions}
+          hasLabelActions={hasLabelActions}
           hasMoveActions={hasMoveActions}
           onClose={onClose}
           onStartTitleEdit={onStartTitleEdit}
           onToggleTaskPinned={onToggleTaskPinned}
-          onOpenPriorityMenu={onOpenPriorityMenu}
-          onOpenTagMenu={onOpenTagMenu}
+          onOpenLabelMenu={onOpenLabelMenu}
           onOpenMoveMenu={onOpenMoveMenu}
           onClearTaskDueDate={onClearTaskDueDate}
+          onSelectTaskPriority={onSelectTaskPriority}
+          onClearTaskPriority={onClearTaskPriority}
         />
       )}
 
@@ -226,15 +231,16 @@ export function TaskRowContextMenu({
             hasPinActions={hasPinActions}
             hasPriorityActions={hasPriorityActions}
             hasDueDateActions={hasDueDateActions}
-            hasTagActions={hasTagActions}
+            hasLabelActions={hasLabelActions}
             hasMoveActions={hasMoveActions}
             onClose={onClose}
             onStartTitleEdit={onStartTitleEdit}
             onToggleTaskPinned={onToggleTaskPinned}
-            onOpenPriorityMenu={onOpenPriorityMenu}
-            onOpenTagMenu={onOpenTagMenu}
+            onOpenLabelMenu={onOpenLabelMenu}
             onOpenMoveMenu={onOpenMoveMenu}
             onClearTaskDueDate={onClearTaskDueDate}
+            onSelectTaskPriority={onSelectTaskPriority}
+            onClearTaskPriority={onClearTaskPriority}
           />
           <TaskMoveToSelector
             lists={lists}
@@ -247,51 +253,17 @@ export function TaskRowContextMenu({
         </div>
       )}
 
-      {view === "priority" && (
-        <div role="menu" className={`w-36 ${menuClassName}`}>
-          {[1, 2, 3, 4].map((priority) => (
-            <button
-              key={priority}
-              type="button"
-              role="menuitem"
-              className={`${menuItemClassName} ${
-                task.priority === priority ? "font-medium" : ""
-              }`}
-              onClick={(event) => {
-                event.stopPropagation();
-                onSelectTaskPriority(priority);
-              }}
-            >
-              Priority {priority}
-            </button>
-          ))}
-          {task.priority ? (
-            <button
-              type="button"
-              role="menuitem"
-              className={menuItemClassName}
-              onClick={(event) => {
-                event.stopPropagation();
-                onClearTaskPriority();
-              }}
-            >
-              Clear priority
-            </button>
-          ) : null}
-        </div>
-      )}
-
-      {view === "tag" && (
-        <TaskTagSelector
-          tags={availableTags}
-          assignedTagIds={assignedTagIds}
-          query={tagQuery}
-          isSubmitting={isTagSubmitting}
-          onQueryChange={onTagQueryChange}
-          onToggleTag={onToggleTagSelection}
-          onCreateTag={onCreateTag}
+      {view === "label" && (
+        <TaskLabelSelector
+          labels={availableLabels}
+          assignedLabelIds={assignedLabelIds}
+          query={labelQuery}
+          isSubmitting={isLabelSubmitting}
+          onQueryChange={onLabelQueryChange}
+          onToggleLabel={onToggleLabelSelection}
+          onCreateLabel={onCreateLabel}
           onCancel={onClose}
-          onConfirm={onConfirmTags}
+          onConfirm={onConfirmLabels}
         />
       )}
     </>

@@ -5,13 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import { IoIosSearch } from "react-icons/io";
 import { IoPricetagsOutline } from "react-icons/io5";
 import { LuPlus } from "react-icons/lu";
-import type { CompletedTask, SearchTask, TaskTag, TodoList } from "./todo-app";
+import type { CompletedTask, SearchTask, TaskLabel, TodoList } from "./todo-app";
 import {
   getListDropIndex,
   getListRowElements,
   reorderListIds,
 } from "./list-reorder";
-import { getTagDotColor } from "./task-tag-pills";
+import { getLabelDotColor } from "./task-label-pills";
 import { ConfirmModal } from "./confirm-modal";
 import { RenameListModal } from "./rename-list-modal";
 import { ThreeDotsIcon } from "./three-dots-icon";
@@ -31,18 +31,18 @@ const NAV_ITEMS = [
 
 type SidebarProps = {
   lists: TodoList[];
-  labelTags: TaskTag[];
+  labels: TaskLabel[];
   taskCountByListId: Record<string, number>;
   completedTasks: CompletedTask[];
   searchTasks: SearchTask[];
   selectedListId: string | null;
-  selectedTagId: string | null;
+  selectedLabelId: string | null;
   isTodaySelected: boolean;
   isNext7DaysSelected: boolean;
   isCalendarSelected: boolean;
   selectedTaskId: string | null;
   onSelectList: (listId: string) => void;
-  onSelectTag: (tagId: string) => void;
+  onSelectLabel: (labelId: string) => void;
   onSelectToday: () => void;
   onSelectNext7Days: () => void;
   onSelectCalendar: () => void;
@@ -84,18 +84,18 @@ function getItemClassName(isSelected: boolean, baseClassName = itemClassName) {
 
 export function Sidebar({
   lists,
-  labelTags,
+  labels,
   taskCountByListId,
   completedTasks,
   searchTasks,
   selectedListId,
-  selectedTagId,
+  selectedLabelId,
   isTodaySelected,
   isNext7DaysSelected,
   isCalendarSelected,
   selectedTaskId,
   onSelectList,
-  onSelectTag,
+  onSelectLabel,
   onSelectToday,
   onSelectNext7Days,
   onSelectCalendar,
@@ -130,6 +130,20 @@ export function Sidebar({
   useEffect(() => {
     setOrderedLists(lists);
   }, [lists]);
+
+  useEffect(() => {
+    function handleSearchShortcut(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.key.toLowerCase() !== "k") return;
+      if (event.altKey || event.shiftKey) return;
+
+      event.preventDefault();
+      setIsSearchOpen(true);
+    }
+
+    document.addEventListener("keydown", handleSearchShortcut);
+    return () => document.removeEventListener("keydown", handleSearchShortcut);
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -198,6 +212,7 @@ export function Sidebar({
         dragState.captureTarget.releasePointerCapture(dragState.pointerId);
       }
       dragState.sourceRow.classList.remove("opacity-50");
+      dragState.sourceRow.style.cursor = "";
     }
 
     setDropIndicatorTop(null);
@@ -244,7 +259,8 @@ export function Sidebar({
 
     sourceRow.classList.add("opacity-50");
     sourceRow.setPointerCapture(pointerId);
-    document.body.style.cursor = "grabbing";
+    sourceRow.style.cursor = "move";
+    document.body.style.cursor = "move";
     document.addEventListener("pointermove", handleListDragMove);
     document.addEventListener("pointerup", handleListDragEnd);
     document.addEventListener("pointercancel", handleListDragEnd);
@@ -274,6 +290,9 @@ export function Sidebar({
     const pointerId = event.pointerId;
     let dragStarted = false;
 
+    dragRow.style.cursor = "move";
+    document.body.style.cursor = "move";
+
     function clearPendingListeners() {
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", onPointerUp);
@@ -296,6 +315,10 @@ export function Sidebar({
     function onPointerUp(upEvent: PointerEvent) {
       if (upEvent.pointerId !== pointerId) return;
       clearPendingListeners();
+      if (!dragStarted) {
+        dragRow.style.cursor = "";
+        document.body.style.cursor = "";
+      }
     }
 
     document.addEventListener("pointermove", onPointerMove);
@@ -359,15 +382,11 @@ export function Sidebar({
               data-list-id={list.id}
               onPointerDown={(event) => handleListPointerDown(event, list.id)}
               onClick={() => handleListClick(list.id)}
-              className={`group relative flex h-[35px] items-center touch-none ${
-                onReorderLists
-                  ? "cursor-grab active:cursor-grabbing"
-                  : "cursor-pointer"
-              } ${
+              className={`group relative flex h-[35px] items-center touch-none cursor-pointer ${
                 !isTodaySelected &&
                 !isNext7DaysSelected &&
                 !isCalendarSelected &&
-                !selectedTagId &&
+                !selectedLabelId &&
                 list.id === selectedListId
                   ? "bg-zinc-200/80 dark:bg-zinc-800"
                   : "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60"
@@ -436,26 +455,26 @@ export function Sidebar({
             <LuPlus className="size-3.5 text-zinc-250 group-hover:text-zinc-600 shrink-0" aria-hidden="true" />
           </button>
 
-          {labelTags.length > 0 ? (
+          {labels.length > 0 ? (
             <div className="mt-3 flex flex-col">
               <p className="px-4 pb-1 text-xs font-medium text-zinc-400 dark:text-zinc-500">
                 Labels
               </p>
-              {labelTags.map((tag) => (
+              {labels.map((item) => (
                 <button
-                  key={tag.id}
+                  key={item.id}
                   type="button"
-                  onClick={() => onSelectTag(tag.id)}
-                  className={`${getItemClassName(selectedTagId === tag.id)} mx-2 gap-2 rounded-lg px-2`}
+                  onClick={() => onSelectLabel(item.id)}
+                  className={`${getItemClassName(selectedLabelId === item.id)} mx-2 gap-2 rounded-lg px-2`}
                 >
                   <IoPricetagsOutline
                     className="size-4 shrink-0 text-zinc-700 dark:text-zinc-300"
                     aria-hidden="true"
                   />
-                  <span className="min-w-0 flex-1 truncate">{tag.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   <span
                     className="size-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: getTagDotColor(tag.id) }}
+                    style={{ backgroundColor: getLabelDotColor(item.id) }}
                     aria-hidden="true"
                   />
                 </button>
