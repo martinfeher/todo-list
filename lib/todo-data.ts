@@ -75,11 +75,34 @@ export async function getTodoData() {
   await seedIfEmpty();
   await ensurePriorityTags();
 
+  const detailFlags = await prisma.$queryRaw<Array<{ id: string; hasDetails: number }>>`
+    SELECT
+      id,
+      CASE
+        WHEN trim(details) = '' THEN 0
+        WHEN trim(details) IN ('<br>', '<div><br></div>', '<p><br></p>') THEN 0
+        ELSE 1
+      END AS hasDetails
+    FROM Task
+  `;
+  const hasDetailsByTaskId = Object.fromEntries(
+    detailFlags.map((row) => [row.id, Boolean(row.hasDetails)]),
+  );
+
   const lists = await prisma.todoList.findMany({
     include: {
       tasks: {
         orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-        include: {
+        select: {
+          id: true,
+          name: true,
+          completed: true,
+          dueDate: true,
+          dueTimeMinutes: true,
+          dueDurationMinutes: true,
+          dueTimeZone: true,
+          pinned: true,
+          parentId: true,
           tags: {
             include: { tag: true },
           },
@@ -104,7 +127,6 @@ export async function getTodoData() {
             id,
             name,
             completed,
-            details,
             dueDate,
             dueTimeMinutes,
             dueDurationMinutes,
@@ -116,7 +138,8 @@ export async function getTodoData() {
           id,
           name,
           completed,
-          details,
+          details: "",
+          hasDetails: hasDetailsByTaskId[id] ?? false,
           dueDate: dueDate ? dueDate.toISOString() : null,
           dueTimeMinutes,
           dueDurationMinutes,

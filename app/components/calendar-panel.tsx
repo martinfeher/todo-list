@@ -132,7 +132,7 @@ function CalendarTabs({
   );
 }
 
-function CalendarMonthView({
+export function CalendarMonthView({
   tasks,
   selectedTaskId,
   onSelectTask,

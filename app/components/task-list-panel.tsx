@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { BiSortAlt2 } from "react-icons/bi";
-import { LuPlus } from "react-icons/lu";
+import { LuCalendarCheck2, LuPlus } from "react-icons/lu";
 import { PiArrowBendDownRight } from "react-icons/pi";
 import { createLabel, getLabels } from "@/app/actions/todo";
 import { TaskListTaskRow } from "./task-list-task-row";
@@ -199,6 +199,12 @@ type TaskListPanelProps = {
     sourceListId: string,
     targetListId: string,
   ) => void;
+  onTaskHoverStart?: (taskId: string) => void;
+  onTaskHoverEnd?: () => void;
+  showListCalendarButton?: boolean;
+  listCalendarButtonRef?: RefObject<HTMLButtonElement | null>;
+  onListCalendarHoverStart?: () => void;
+  onListCalendarHoverLeave?: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
 export function TaskListPanel({
@@ -226,6 +232,12 @@ export function TaskListPanel({
   onToggleTaskLabel,
   onLabelsChanged,
   onMoveTaskToList,
+  onTaskHoverStart,
+  onTaskHoverEnd,
+  showListCalendarButton = false,
+  listCalendarButtonRef,
+  onListCalendarHoverStart,
+  onListCalendarHoverLeave,
 }: TaskListPanelProps) {
   const [newTaskName, setNewTaskName] = useState("");
   const [isAddingTask, setIsAddingTask] = useState(false);
@@ -508,6 +520,37 @@ export function TaskListPanel({
 
     onSelectTask(task.id);
     startTitleEdit(task);
+  }
+
+  function handleTaskHoverEnd(
+    event: React.MouseEvent<HTMLLIElement>,
+    task: TaskListItem,
+  ) {
+    if (!onTaskHoverEnd) return;
+
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Node) {
+      if (pointerContextMenuRef.current?.contains(relatedTarget)) return;
+      if (taskDateMenuRef.current?.contains(relatedTarget)) return;
+      if (
+        relatedTarget instanceof Element &&
+        relatedTarget.closest("[data-task-id]")
+      ) {
+        return;
+      }
+    }
+
+    if (
+      openMenuTaskId === task.id ||
+      openLabelMenuTaskId === task.id ||
+      openMoveMenuTaskId === task.id ||
+      openDatePickerTaskId === task.id ||
+      pointerContextMenu?.taskId === task.id
+    ) {
+      return;
+    }
+
+    onTaskHoverEnd();
   }
 
   function cancelTitleEdit(task: TaskListItem) {
@@ -1042,6 +1085,16 @@ export function TaskListPanel({
           taskContextMenuRef={taskContextMenuRef}
           dueDateLabel={formatTaskDueDateLabel(task.dueDate)}
           onTaskClick={handleTaskClick}
+          onTaskHoverStart={
+            onTaskHoverStart
+              ? () => onTaskHoverStart(task.id)
+              : undefined
+          }
+          onTaskHoverEnd={
+            onTaskHoverEnd
+              ? (event) => handleTaskHoverEnd(event, task)
+              : undefined
+          }
           onTaskContextMenu={handleTaskContextMenu}
           onToggleTask={onToggleTask}
           onTitleDraftChange={(taskId, value) => {
@@ -1261,6 +1314,24 @@ export function TaskListPanel({
               )
             )}
           </ul>
+
+          {showListCalendarButton ? (
+            <div className="flex justify-end border-t border-zinc-200 px-4 py-2 dark:border-zinc-800">
+              <button
+                ref={listCalendarButtonRef}
+                type="button"
+                onMouseEnter={onListCalendarHoverStart}
+                onMouseLeave={onListCalendarHoverLeave}
+                aria-label={`Calendar - ${title}`}
+                className="group flex items-center overflow-hidden rounded-lg bg-zinc-150 py-[4px] pl-[9px] pr-[9px] text-zinc-700 transition-[background-color,padding] hover:bg-zinc-250 cursor-pointer dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+              >
+                <LuCalendarCheck2 className="size-4 shrink-0" aria-hidden="true" />
+                <span className="max-w-0 overflow-hidden whitespace-nowrap text-[12px] font-medium opacity-0 transition-[max-width,opacity,padding] duration-200 ease-out group-hover:max-w-[12rem] group-hover:pl-1.5 group-hover:opacity-100">
+                  {title}
+                </span>
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="p-4">

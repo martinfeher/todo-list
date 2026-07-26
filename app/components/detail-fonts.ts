@@ -335,6 +335,39 @@ export function resetFontSizeInPasteBatch(
   return changed;
 }
 
+export function getPasteBatchPromptPosition(
+  editor: HTMLElement,
+  wrapper: HTMLElement,
+  pasteId: string,
+) {
+  const selector = getPasteBatchSelector(pasteId);
+  const lines = Array.from(
+    editor.querySelectorAll(`:scope > .${DETAIL_LINE_CLASS}`),
+  ).filter((line) => line.querySelector(selector));
+
+  const targetLine = lines.at(-1);
+  const wrapperRect = wrapper.getBoundingClientRect();
+
+  if (targetLine instanceof HTMLElement) {
+    const lineRect = targetLine.getBoundingClientRect();
+    return {
+      top: Math.max(8, lineRect.bottom - wrapperRect.top + 8),
+      left: Math.max(8, lineRect.left - wrapperRect.left),
+    };
+  }
+
+  const lastBatchElement = editor.querySelector(selector);
+  if (lastBatchElement instanceof HTMLElement) {
+    const rect = lastBatchElement.getBoundingClientRect();
+    return {
+      top: Math.max(8, rect.bottom - wrapperRect.top + 8),
+      left: Math.max(8, rect.left - wrapperRect.left),
+    };
+  }
+
+  return { top: 12, left: 12 };
+}
+
 export function clearPasteBatchMarkers(editor: HTMLElement, pasteId: string) {
   for (const element of Array.from(
     editor.querySelectorAll(getPasteBatchSelector(pasteId)),

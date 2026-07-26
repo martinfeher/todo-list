@@ -32,14 +32,47 @@ function createLineElement(html = "<br>", type: LineBlockType = "text") {
   return line;
 }
 
+function isBlankLinePart(part: string) {
+  const trimmed = part.trim();
+  if (!trimmed) return true;
+
+  return (
+    /^<br\s*\/?>$/i.test(trimmed) ||
+    /^<div>\s*<br\s*\/?>\s*<\/div>$/i.test(trimmed) ||
+    /^<div>\s*<\/div>$/i.test(trimmed)
+  );
+}
+
+function stripTrailingLineBreakMarkup(html: string) {
+  let result = html;
+  let previous = "";
+
+  while (result !== previous) {
+    previous = result;
+    result = result
+      .replace(/(<br\s*\/?>\s*)+$/gi, "")
+      .replace(/(<div>\s*<br\s*\/?>\s*<\/div>\s*)+$/gi, "")
+      .trimEnd();
+  }
+
+  return result;
+}
+
 function htmlToLineParts(html: string) {
   if (!html.trim()) return ["<br>"];
 
-  const normalized = html
+  const withoutTrailingBreaks = stripTrailingLineBreakMarkup(html);
+  if (!withoutTrailingBreaks.trim()) return ["<br>"];
+
+  const normalized = withoutTrailingBreaks
     .replace(/<\/div>\s*<div[^>]*>/gi, "<<LINE_BREAK>>")
     .replace(/<br\s*\/?>/gi, "<<LINE_BREAK>>");
 
   const parts = normalized.split("<<LINE_BREAK>>").map((part) => part.trim());
+
+  while (parts.length > 1 && isBlankLinePart(parts[parts.length - 1])) {
+    parts.pop();
+  }
 
   return parts.length > 0 ? parts.map((part) => part || "<br>") : ["<br>"];
 }
@@ -926,6 +959,11 @@ export function buildEditorHtmlFromTask(title: string, detailsHtml: string) {
   return editor.innerHTML;
 }
 
+export function getEditorTitle(editor: HTMLElement) {
+  const lines = getLineElements(editor);
+  return (lines[0]?.textContent ?? "").replace(/\u00a0/g, " ").trim();
+}
+
 export function splitEditorContent(html: string) {
   const editor = document.createElement("div");
   editor.innerHTML = html;
@@ -933,7 +971,7 @@ export function splitEditorContent(html: string) {
   ensureTitleLine(editor);
 
   const lines = getLineElements(editor);
-  const title = (lines[0]?.textContent ?? "").replace(/\u00a0/g, " ").trim();
+  const title = getEditorTitle(editor);
   const detailsRoot = document.createElement("div");
 
   lines.slice(1).forEach((line) => {

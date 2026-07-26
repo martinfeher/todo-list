@@ -274,7 +274,7 @@ export function SearchModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="search-modal-title"
-        className="flex max-h-[min(70vh,520px)] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-zinc-900"
+        className="flex max-h-[min(70vh,520px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-zinc-900"
       >
         <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <h2 id="search-modal-title" className="sr-only">

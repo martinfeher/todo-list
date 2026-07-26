@@ -11,7 +11,9 @@ import {
   LuList,
   LuPilcrow,
 } from "react-icons/lu";
-import { getTaskById, renameTask, updateTaskDetails, updateTaskDueDate, updateTaskDueTime } from "@/app/actions/todo";
+import { renameTask, updateTaskDueDate, updateTaskDueTime } from "@/app/actions/todo";
+import { fetchTaskById, saveTaskDetails } from "@/lib/task-details-api";
+import { taskDetailsHasContent } from "@/lib/task-details-content";
 import {
   formatDueTimeLabel,
   formatDurationLabel,
@@ -39,6 +41,7 @@ import {
   focusNoteAtEnd,
   removeImageWrapper,
   reorderLine,
+  getEditorTitle,
   splitEditorContent,
   splitBlockLinesOnBreaks,
   splitLineAtCursor,
@@ -65,12 +68,11 @@ import {
 } from "./detail-links";
 import {
   clearPasteBatchMarkers,
+  getPasteBatchPromptPosition,
   insertPasteFragmentAtSelection,
   PASTE_FORMAT_PROMPT_MS,
   pastedHtmlHasFormatting,
   preparePasteFragment,
-  resetFontFamilyInPasteBatch,
-  resetFontSizeInPasteBatch,
   stripFormattingInPasteBatch,
 } from "./detail-fonts";
 import { TaskDatePicker } from "./task-date-picker";
@@ -106,7 +108,9 @@ type TaskDetailsPanelProps = {
   taskId: string | null;
   taskSnapshot?: TaskDetailsSnapshot | null;
   focusNoteAtEndRequest?: number;
+  isHoverPreview?: boolean;
   onDetailsSaved: (taskId: string, details: string) => void;
+  onTaskHasDetailsKnown?: (taskId: string, hasDetails: boolean) => void;
   onTaskRenamed: (taskId: string, name: string) => void;
   onDueDateUpdated: (
     taskId: string,
@@ -180,8 +184,18 @@ const ADD_BLOCK_OPTIONS: {
 ];
 
 const AUTO_SAVE_DELAY_MS = 4000;
+const LARGE_CONTENT_AUTO_SAVE_DELAY_MS = 8000;
 const HISTORY_DEBOUNCE_MS = 400;
+const LARGE_CONTENT_HISTORY_DEBOUNCE_MS = 1200;
 const HISTORY_LIMIT = 50;
+const LARGE_CONTENT_HISTORY_LIMIT = 8;
+const LARGE_CONTENT_THRESHOLD = 200_000;
+const LINE_CONTROLS_DEBOUNCE_MS = 120;
+const FORMAT_MENU_DEBOUNCE_MS = 80;
+const SMALL_CONTENT_INPUT_DEBOUNCE_MS = 80;
+const INPUT_NORMALIZE_DEBOUNCE_MS = 400;
+const TITLE_SYNC_DEBOUNCE_MS = 300;
+const MAX_DETAILS_SAVE_BYTES = 9 * 1024 * 1024;
 
 const HIGHLIGHT_COLOR = "#fef08a";
 const DEFAULT_TEXT_COLOR = "#444444";
@@ -336,7 +350,9 @@ export function TaskDetailsPanel({
   taskId,
   taskSnapshot = null,
   focusNoteAtEndRequest = 0,
+  isHoverPreview = false,
   onDetailsSaved,
+  onTaskHasDetailsKnown,
   onTaskRenamed,
   onDueDateUpdated,
 }: TaskDetailsPanelProps) {
@@ -361,11 +377,11 @@ export function TaskDetailsPanel({
     top: number;
     left: number;
     removeFormatting: boolean;
-    useDefaultFont: boolean;
-    useDefaultSize: boolean;
   } | null>(null);
   const savedDetailsRef = useRef("");
   const detailsRef = useRef("");
+  const isLargeContentRef = useRef(false);
+  const saveStatusRef = useRef<SaveStatus>("idle");
   const taskIdRef = useRef<string | null>(null);
   const taskNameRef = useRef("");
   const syncedTitleRef = useRef("");
@@ -401,6 +417,11 @@ export function TaskDetailsPanel({
   const imageDropDepthRef = useRef(0);
   const pasteFormatPromptTimerRef = useRef<number | null>(null);
   const pasteFormatPromptRef = useRef(pasteFormatPrompt);
+  const inputNormalizeFrameRef = useRef<number | null>(null);
+  const inputNormalizeTimerRef = useRef<number | null>(null);
+  const formatMenuTimerRef = useRef<number | null>(null);
+  const lineControlsTimerRef = useRef<number | null>(null);
+  const titleSyncTimerRef = useRef<number | null>(null);
 
   const readEditorContent = useCallback(() => {
     return normalizeDetails(editorRef.current?.innerHTML ?? "");
@@ -417,14 +438,22 @@ export function TaskDetailsPanel({
     const editor = editorRef.current;
     if (!currentTaskId || !editor || !isReadyRef.current) return;
 
-    const { title } = splitEditorContent(editor.innerHTML);
+    const title = getEditorTitle(editor);
     if (!title || title === syncedTitleRef.current) return;
 
     syncedTitleRef.current = title;
     setTask((current) =>
       current ? { ...current, name: title } : current,
     );
-    onTaskRenamed(currentTaskId, title);
+
+    if (titleSyncTimerRef.current !== null) {
+      window.clearTimeout(titleSyncTimerRef.current);
+    }
+
+    titleSyncTimerRef.current = window.setTimeout(() => {
+      titleSyncTimerRef.current = null;
+      onTaskRenamed(currentTaskId, title);
+    }, TITLE_SYNC_DEBOUNCE_MS);
   }, [onTaskRenamed]);
 
   const syncExternalTaskName = useCallback(
@@ -432,7 +461,7 @@ export function TaskDetailsPanel({
       const editor = editorRef.current;
       if (!editor || !isReadyRef.current) return;
 
-      const { title } = splitEditorContent(editor.innerHTML);
+      const title = getEditorTitle(editor);
       if (title === name) {
         syncedTitleRef.current = name;
         return;
@@ -462,6 +491,12 @@ export function TaskDetailsPanel({
     },
     [],
   );
+
+  const markSavePending = useCallback(() => {
+    if (saveStatusRef.current === "pending") return;
+    saveStatusRef.current = "pending";
+    setSaveStatus("pending");
+  }, []);
 
   const updateHistoryAvailability = useCallback(() => {
     setCanUndo(historyIndexRef.current > 0);
@@ -493,7 +528,11 @@ export function TaskDetailsPanel({
     const nextHistory = historyRef.current.slice(0, historyIndexRef.current + 1);
     nextHistory.push(snapshot);
 
-    if (nextHistory.length > HISTORY_LIMIT) {
+    const historyLimit = isLargeContentRef.current
+      ? LARGE_CONTENT_HISTORY_LIMIT
+      : HISTORY_LIMIT;
+
+    if (nextHistory.length > historyLimit) {
       nextHistory.shift();
     }
 
@@ -509,10 +548,14 @@ export function TaskDetailsPanel({
       window.clearTimeout(historyTimerRef.current);
     }
 
+    const debounceMs = isLargeContentRef.current
+      ? LARGE_CONTENT_HISTORY_DEBOUNCE_MS
+      : HISTORY_DEBOUNCE_MS;
+
     historyTimerRef.current = window.setTimeout(() => {
       historyTimerRef.current = null;
       pushHistorySnapshot();
-    }, HISTORY_DEBOUNCE_MS);
+    }, debounceMs);
   }, [pushHistorySnapshot]);
 
   const flushHistorySnapshot = useCallback(() => {
@@ -540,7 +583,14 @@ export function TaskDetailsPanel({
 
     try {
       if (details !== savedDetailsRef.current) {
-        await updateTaskDetails(currentTaskId, details);
+        const detailsBytes = new TextEncoder().encode(details).byteLength;
+        if (detailsBytes > MAX_DETAILS_SAVE_BYTES) {
+          saveStatusRef.current = "error";
+          setSaveStatus("error");
+          return;
+        }
+
+        await saveTaskDetails(currentTaskId, details);
         savedDetailsRef.current = details;
         onDetailsSaved(currentTaskId, details);
         nextStatus = "saved";
@@ -558,9 +608,11 @@ export function TaskDetailsPanel({
       }
 
       if (nextStatus) {
+        saveStatusRef.current = nextStatus;
         setSaveStatus(nextStatus);
       }
     } catch {
+      saveStatusRef.current = "error";
       setSaveStatus("error");
     }
   }, [onDetailsSaved, onTaskRenamed]);
@@ -570,13 +622,17 @@ export function TaskDetailsPanel({
       window.clearTimeout(saveTimerRef.current);
     }
 
-    setSaveStatus("pending");
+    markSavePending();
+
+    const delay = isLargeContentRef.current
+      ? LARGE_CONTENT_AUTO_SAVE_DELAY_MS
+      : AUTO_SAVE_DELAY_MS;
 
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null;
       void saveDetails();
-    }, AUTO_SAVE_DELAY_MS);
-  }, [saveDetails]);
+    }, delay);
+  }, [markSavePending, saveDetails]);
 
   const updateLineControls = useCallback(() => {
     const editor = editorRef.current;
@@ -627,6 +683,74 @@ export function TaskDetailsPanel({
     setLineControls([{ lineId, top: position.top }]);
   }, [addBlockMenu]);
 
+  const scheduleLineControlsUpdate = useCallback(() => {
+    if (lineControlsTimerRef.current !== null) {
+      window.clearTimeout(lineControlsTimerRef.current);
+    }
+
+    lineControlsTimerRef.current = window.setTimeout(() => {
+      lineControlsTimerRef.current = null;
+      updateLineControls();
+    }, LINE_CONTROLS_DEBOUNCE_MS);
+  }, [updateLineControls]);
+
+  const runEditorNormalization = useCallback(
+    (mode: "light" | "full") => {
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      ensureBlockLines(editor);
+      ensureTitleLine(editor);
+
+      if (mode === "full") {
+        splitBlockLinesOnBreaks(editor);
+        normalizeLinks(editor);
+        syncLineEmptyState(editor);
+      }
+
+      syncEditorContent();
+      syncTitleToTaskList();
+      scheduleHistorySnapshot();
+      scheduleAutoSave();
+      scheduleLineControlsUpdate();
+    },
+    [
+      scheduleAutoSave,
+      scheduleHistorySnapshot,
+      scheduleLineControlsUpdate,
+      syncEditorContent,
+      syncTitleToTaskList,
+    ],
+  );
+
+  const normalizeEditorAfterInput = useCallback(() => {
+    runEditorNormalization(isLargeContentRef.current ? "light" : "full");
+  }, [runEditorNormalization]);
+
+  const scheduleInputNormalization = useCallback(() => {
+    if (inputNormalizeFrameRef.current !== null) {
+      window.cancelAnimationFrame(inputNormalizeFrameRef.current);
+      inputNormalizeFrameRef.current = null;
+    }
+
+    if (inputNormalizeTimerRef.current !== null) {
+      window.clearTimeout(inputNormalizeTimerRef.current);
+      inputNormalizeTimerRef.current = null;
+    }
+
+    const debounceMs = isLargeContentRef.current
+      ? INPUT_NORMALIZE_DEBOUNCE_MS
+      : SMALL_CONTENT_INPUT_DEBOUNCE_MS;
+
+    inputNormalizeTimerRef.current = window.setTimeout(() => {
+      inputNormalizeTimerRef.current = null;
+      inputNormalizeFrameRef.current = window.requestAnimationFrame(() => {
+        inputNormalizeFrameRef.current = null;
+        normalizeEditorAfterInput();
+      });
+    }, debounceMs);
+  }, [normalizeEditorAfterInput]);
+
   const closeFormatMenu = useCallback(() => {
     setFormatMenu(null);
     setShowColorMenu(false);
@@ -655,40 +779,26 @@ export function TaskDetailsPanel({
     setPasteFormatPrompt(null);
   }, []);
 
-  const getPastePromptPosition = useCallback(() => {
+  const getPastePromptPosition = useCallback((pasteId: string) => {
     const editor = editorRef.current;
     const wrapper = editorWrapperRef.current;
     if (!editor || !wrapper) {
       return { top: 12, left: 12 };
     }
 
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) {
-      return { top: 12, left: 12 };
-    }
-
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    const wrapperRect = wrapper.getBoundingClientRect();
-
-    return {
-      top: Math.max(8, rect.bottom - wrapperRect.top + 8),
-      left: Math.max(8, rect.left - wrapperRect.left),
-    };
+    return getPasteBatchPromptPosition(editor, wrapper, pasteId);
   }, []);
 
   const showPasteFormatPrompt = useCallback(
     (pasteId: string) => {
       dismissPasteFormatPrompt();
 
-      const position = getPastePromptPosition();
+      const position = getPastePromptPosition(pasteId);
       setPasteFormatPrompt({
         pasteId,
         top: position.top,
         left: position.left,
         removeFormatting: false,
-        useDefaultFont: false,
-        useDefaultSize: false,
       });
 
       pasteFormatPromptTimerRef.current = window.setTimeout(() => {
@@ -721,44 +831,35 @@ export function TaskDetailsPanel({
   ]);
 
   const applyPasteFormatOption = useCallback(
-    (
-      option: "removeFormatting" | "useDefaultFont" | "useDefaultSize",
-      enabled: boolean,
-    ) => {
+    (enabled: boolean) => {
       const editor = editorRef.current;
-      if (!editor) return;
+      const current = pasteFormatPromptRef.current;
+      if (!editor || !current) return;
 
-      setPasteFormatPrompt((current) => {
-        if (!current) return current;
+      const pasteId = current.pasteId;
 
-        const next = { ...current, [option]: enabled };
-        const pasteId = current.pasteId;
+      requestAnimationFrame(() => {
+        const currentEditor = editorRef.current;
+        if (!currentEditor) return;
 
-        requestAnimationFrame(() => {
-          const currentEditor = editorRef.current;
-          if (!currentEditor) return;
+        if (enabled) {
+          stripFormattingInPasteBatch(currentEditor, pasteId);
+        }
 
-          if (enabled) {
-            if (option === "removeFormatting") {
-              stripFormattingInPasteBatch(currentEditor, pasteId);
-            } else if (option === "useDefaultFont") {
-              resetFontFamilyInPasteBatch(currentEditor, pasteId);
-            } else {
-              resetFontSizeInPasteBatch(currentEditor, pasteId);
-            }
-          }
-
-          ensureBlockLines(currentEditor);
-          syncLineEmptyState(currentEditor);
-          syncEditorContent();
-          recordHistorySnapshot();
-          scheduleAutoSave();
-        });
-
-        return next;
+        ensureBlockLines(currentEditor);
+        syncLineEmptyState(currentEditor);
+        syncEditorContent();
+        recordHistorySnapshot();
+        scheduleAutoSave();
+        dismissPasteFormatPrompt(pasteId);
       });
     },
-    [recordHistorySnapshot, scheduleAutoSave, syncEditorContent],
+    [
+      dismissPasteFormatPrompt,
+      recordHistorySnapshot,
+      scheduleAutoSave,
+      syncEditorContent,
+    ],
   );
 
   useEffect(() => {
@@ -1060,7 +1161,7 @@ export function TaskDetailsPanel({
   }, [focusNoteAtEndRequest, task?.id, taskId, updateLineControls]);
 
   useEffect(() => {
-    if (!taskId || !taskSnapshot || !isReadyRef.current) return;
+    if (!taskId || !taskSnapshot || !isReadyRef.current || isHoverPreview) return;
     if (taskId !== taskIdRef.current) return;
 
     syncExternalTaskName(taskSnapshot.name);
@@ -1086,7 +1187,17 @@ export function TaskDetailsPanel({
         dueTimeZone: taskSnapshot.dueTimeZone,
       };
     });
-  }, [taskId, taskSnapshot, isDateMenuOpen, syncExternalTaskName]);
+  }, [
+    taskId,
+    taskSnapshot?.name,
+    taskSnapshot?.dueDate,
+    taskSnapshot?.dueTimeMinutes,
+    taskSnapshot?.dueDurationMinutes,
+    taskSnapshot?.dueTimeZone,
+    isDateMenuOpen,
+    isHoverPreview,
+    syncExternalTaskName,
+  ]);
 
   useEffect(() => {
     if (saveTimerRef.current !== null) {
@@ -1100,10 +1211,12 @@ export function TaskDetailsPanel({
       setTask(null);
       savedDetailsRef.current = "";
       detailsRef.current = "";
+      isLargeContentRef.current = false;
       taskNameRef.current = "";
       syncedTitleRef.current = "";
       previousTextRef.current = "";
       taskIdRef.current = null;
+      saveStatusRef.current = "idle";
       setSaveStatus("idle");
       closeFormatMenu();
       setLineControls([]);
@@ -1121,13 +1234,14 @@ export function TaskDetailsPanel({
     isReadyRef.current = false;
     hydratedTaskIdRef.current = null;
     setSaveStatus("loading");
+    saveStatusRef.current = "loading";
     closeFormatMenu();
     setLineControls([]);
     setAddBlockMenu(null);
     setTextTypeMenu(null);
     setIsDateMenuOpen(false);
 
-    void getTaskById(taskId)
+    void fetchTaskById(taskId)
       .then((loadedTask) => {
         if (cancelled) return;
 
@@ -1157,11 +1271,19 @@ export function TaskDetailsPanel({
         });
         savedDetailsRef.current = loadedDetails;
         detailsRef.current = editorHtml;
+        isLargeContentRef.current =
+          loadedDetails.length > LARGE_CONTENT_THRESHOLD ||
+          editorHtml.length > LARGE_CONTENT_THRESHOLD;
         taskNameRef.current = loadedTask.name;
         syncedTitleRef.current = loadedTask.name;
         taskIdRef.current = loadedTask.id;
         isReadyRef.current = true;
         setSaveStatus("idle");
+        saveStatusRef.current = "idle";
+        onTaskHasDetailsKnown?.(
+          loadedTask.id,
+          taskDetailsHasContent(loadedDetails),
+        );
       })
       .catch(() => {
         if (!cancelled) {
@@ -1184,7 +1306,7 @@ export function TaskDetailsPanel({
       const { title, details } = splitEditorContent(editorHtml);
 
       if (previousTaskId && details !== savedDetailsRef.current) {
-        void updateTaskDetails(previousTaskId, details);
+        void saveTaskDetails(previousTaskId, details);
       }
 
       if (
@@ -1197,7 +1319,7 @@ export function TaskDetailsPanel({
         });
       }
     };
-  }, [closeFormatMenu, onTaskRenamed, taskId]);
+  }, [closeFormatMenu, onTaskHasDetailsKnown, onTaskRenamed, taskId]);
 
   useEffect(() => {
     return () => {
@@ -1207,6 +1329,26 @@ export function TaskDetailsPanel({
 
       if (historyTimerRef.current !== null) {
         window.clearTimeout(historyTimerRef.current);
+      }
+
+      if (lineControlsTimerRef.current !== null) {
+        window.clearTimeout(lineControlsTimerRef.current);
+      }
+
+      if (titleSyncTimerRef.current !== null) {
+        window.clearTimeout(titleSyncTimerRef.current);
+      }
+
+      if (inputNormalizeFrameRef.current !== null) {
+        window.cancelAnimationFrame(inputNormalizeFrameRef.current);
+      }
+
+      if (inputNormalizeTimerRef.current !== null) {
+        window.clearTimeout(inputNormalizeTimerRef.current);
+      }
+
+      if (formatMenuTimerRef.current !== null) {
+        window.clearTimeout(formatMenuTimerRef.current);
       }
 
       document.removeEventListener("pointermove", handleDragMove);
@@ -1256,9 +1398,17 @@ export function TaskDetailsPanel({
 
     function handleSelectionChange() {
       if (!formatMenuRef.current?.contains(document.activeElement)) {
-        updateFormatMenu();
+        if (formatMenuTimerRef.current !== null) {
+          window.clearTimeout(formatMenuTimerRef.current);
+        }
+
+        formatMenuTimerRef.current = window.setTimeout(() => {
+          formatMenuTimerRef.current = null;
+          updateFormatMenu();
+        }, FORMAT_MENU_DEBOUNCE_MS);
       }
-      updateLineControls();
+
+      scheduleLineControlsUpdate();
     }
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -1268,7 +1418,7 @@ export function TaskDetailsPanel({
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("selectionchange", handleSelectionChange);
     };
-  }, [closeFormatMenu, saveDetails, updateFormatMenu, updateLineControls]);
+  }, [closeFormatMenu, saveDetails, scheduleLineControlsUpdate, updateFormatMenu]);
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
@@ -1304,33 +1454,7 @@ export function TaskDetailsPanel({
   }, [handleUndo, handleRedo]);
 
   function handleEditorInput() {
-    const editor = editorRef.current;
-    if (editor) {
-      ensureBlockLines(editor);
-      splitBlockLinesOnBreaks(editor);
-      ensureTitleLine(editor);
-      normalizeLinks(editor);
-      syncLineEmptyState(editor);
-    }
-
-    const nextText = editorRef.current?.textContent ?? "";
-    const previousText = previousTextRef.current;
-    const previousSpaceCount = (previousText.match(/ /g) ?? []).length;
-    const nextSpaceCount = (nextText.match(/ /g) ?? []).length;
-
-    previousTextRef.current = nextText;
-    syncEditorContent();
-    syncTitleToTaskList();
-    scheduleHistorySnapshot();
-
-    if (nextSpaceCount > previousSpaceCount) {
-      flushHistorySnapshot();
-      void saveDetails();
-      return;
-    }
-
-    scheduleAutoSave();
-    updateLineControls();
+    scheduleInputNormalization();
   }
 
   async function insertImagesFromFiles(
@@ -1449,14 +1573,26 @@ export function TaskDetailsPanel({
   }
 
   function handleEditorBlur(event: React.FocusEvent<HTMLDivElement>) {
-    const nextTarget = event.relatedTarget as Node | null;
+    const nextTarget = event.relatedTarget;
     if (
-      lineControlsRef.current?.contains(nextTarget) ||
-      addBlockMenuRef.current?.contains(nextTarget)
+      nextTarget instanceof Node &&
+      (lineControlsRef.current?.contains(nextTarget) ||
+        addBlockMenuRef.current?.contains(nextTarget))
     ) {
       return;
     }
 
+    if (inputNormalizeTimerRef.current !== null) {
+      window.clearTimeout(inputNormalizeTimerRef.current);
+      inputNormalizeTimerRef.current = null;
+    }
+
+    if (inputNormalizeFrameRef.current !== null) {
+      window.cancelAnimationFrame(inputNormalizeFrameRef.current);
+      inputNormalizeFrameRef.current = null;
+    }
+
+    runEditorNormalization("full");
     flushHistorySnapshot();
     void saveDetails();
   }
@@ -1471,7 +1607,7 @@ export function TaskDetailsPanel({
 
     const line = getLineElementAtPoint(editor, event.clientY);
     hoveredLineRef.current = line;
-    updateLineControls();
+    scheduleLineControlsUpdate();
   }
 
   function handleEditorWrapperMouseEnter() {
@@ -1481,18 +1617,19 @@ export function TaskDetailsPanel({
   function handleEditorWrapperMouseLeave(
     event: React.MouseEvent<HTMLDivElement>,
   ) {
-    const relatedTarget = event.relatedTarget as Node | null;
+    const relatedTarget = event.relatedTarget;
     if (
-      lineControlsRef.current?.contains(relatedTarget) ||
-      addBlockMenuRef.current?.contains(relatedTarget) ||
-      textTypeMenuRef.current?.contains(relatedTarget)
+      relatedTarget instanceof Node &&
+      (lineControlsRef.current?.contains(relatedTarget) ||
+        addBlockMenuRef.current?.contains(relatedTarget) ||
+        textTypeMenuRef.current?.contains(relatedTarget))
     ) {
       return;
     }
 
     isMouseOverEditorRef.current = false;
     hoveredLineRef.current = null;
-    updateLineControls();
+    scheduleLineControlsUpdate();
   }
 
   function handleEditorFocus() {
@@ -1734,18 +1871,30 @@ export function TaskDetailsPanel({
     }
   }
 
-  function handleEditorKeyUp(event: React.KeyboardEvent<HTMLDivElement>) {
-    updateFormatMenu();
-    updateLineControls();
-
-    if (event.key === "Enter") {
-      updateLineControls();
+  function handleEditorKeyUp() {
+    if (formatMenuTimerRef.current !== null) {
+      window.clearTimeout(formatMenuTimerRef.current);
     }
+
+    formatMenuTimerRef.current = window.setTimeout(() => {
+      formatMenuTimerRef.current = null;
+      updateFormatMenu();
+    }, FORMAT_MENU_DEBOUNCE_MS);
+
+    scheduleLineControlsUpdate();
   }
 
   function handleEditorMouseUp() {
-    updateFormatMenu();
-    updateLineControls();
+    if (formatMenuTimerRef.current !== null) {
+      window.clearTimeout(formatMenuTimerRef.current);
+    }
+
+    formatMenuTimerRef.current = window.setTimeout(() => {
+      formatMenuTimerRef.current = null;
+      updateFormatMenu();
+    }, FORMAT_MENU_DEBOUNCE_MS);
+
+    scheduleLineControlsUpdate();
   }
 
   function handleEditorContextMenu(event: React.MouseEvent<HTMLDivElement>) {
@@ -1894,10 +2043,13 @@ export function TaskDetailsPanel({
     }
   }
 
+  const dueDateLabel = task ? formatDueDateLabel(task.dueDate) : null;
+  const dueTimeLabel = task ? formatDueTimeLabel(task.dueTimeMinutes) : null;
+
   return (
     <section
       ref={panelRef}
-      className="relative min-w-0 flex-1 bg-zinc-50 dark:bg-zinc-950"
+      className="relative min-w-0 flex-1 bg-[#fbfbfc] "
     >
       <div className="relative flex items-center justify-between overflow-visible p-4">
         <div className="flex items-center gap-3">
@@ -1907,14 +2059,31 @@ export function TaskDetailsPanel({
                 <button
                   ref={dateButtonRef}
                   type="button"
-                  aria-label="Set task date"
+                  aria-label={
+                    dueDateLabel
+                      ? `Due ${dueDateLabel}. Change date`
+                      : "Set task date"
+                  }
                   aria-haspopup="dialog"
                   aria-expanded={isDateMenuOpen}
                   onClick={handleDateButtonClick}
-                  className="flex cursor-pointer items-center gap-1 rounded-2xl bg-[#e8eff2] pl-3.5 pr-3 py-[7px] text-[12px] font-semibold uppercase tracking-wide text-zinc-700 transition-colors hover:bg-[#e0e2e5] dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                  className="flex cursor-pointer items-center gap-1 rounded-[15px] bg-[#e8eff2] pl-3.5 pr-3 py-[7px] text-[12px] font-semibold uppercase tracking-wide text-zinc-700 transition-colors hover:bg-[#e0e2e5] dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
                 >
                   <span>Date</span>
-                  <PlusIcon className="ml-1 size-3 text-[#5F5F5F]" />
+                  {dueDateLabel ? (
+                    <span className="ml-1 flex flex-col items-start normal-case tracking-normal">
+                      <span className="font-medium text-[#5F5F5F] dark:text-zinc-300">
+                        {dueDateLabel}
+                      </span>
+                      {dueTimeLabel ? (
+                        <span className="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">
+                          {dueTimeLabel}
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : (
+                    <PlusIcon className="ml-1 size-3 text-[#5F5F5F]" />
+                  )}
                 </button>
 
                 {isDateMenuOpen && (
@@ -1935,22 +2104,7 @@ export function TaskDetailsPanel({
                   </div>
                 )}
               </div>
-              {task.dueDate && formatDueDateLabel(task.dueDate) && (
-                <div
-                  className="cursor-pointer text-[13px] text-zinc-500 dark:text-zinc-400"
-                  onClick={handleDateButtonClick}
-                >
-                  <div className="flex flex-col items-end text-right">
-                    <p>{formatDueDateLabel(task.dueDate)}</p>
-                    {formatDueTimeLabel(task.dueTimeMinutes) && (
-                      <p className="text-[10px]">
-                        {formatDueTimeLabel(task.dueTimeMinutes)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-              <span className="text-[#c0c0c0] ml-2">|</span>
+              <span className="text-[#cfcfcf] ml-2">|</span>
               <div className="flex items-center overflow-hidden rounded">
                 <button
                   type="button"
@@ -1999,7 +2153,11 @@ export function TaskDetailsPanel({
           Loading task details...
         </p>
       ) : task ? (
-        <div className="flex flex-col px-4 pb-4">
+        <div
+          className={`flex flex-col px-4 pb-4 transition-opacity ${
+            isHoverPreview ? "opacity-70" : "opacity-100"
+          }`}
+        >
           <div
             ref={editorWrapperRef}
             className="relative overflow-visible text-[#333333]"
@@ -2018,64 +2176,30 @@ export function TaskDetailsPanel({
 
             {pasteFormatPrompt && (
               <div
-                className="absolute z-40 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-zinc-200 bg-white/95 px-3 py-2 text-xs shadow-md backdrop-blur-sm dark:border-zinc-700 dark:bg-zinc-900/95"
+                className="absolute z-40 flex max-w-[calc(100%-1rem)] items-center gap-2 rounded-lg border border-zinc-200 bg-white/95 px-3 py-2 text-xs shadow-md backdrop-blur-sm dark:border-zinc-700 dark:bg-zinc-900/95"
                 style={{
                   top: pasteFormatPrompt.top,
                   left: pasteFormatPrompt.left,
                 }}
                 onMouseDown={(event) => event.preventDefault()}
               >
-                <span className="font-medium text-zinc-500 dark:text-zinc-400">
-                  Pasted formatting
-                </span>
                 <label className="flex cursor-pointer items-center gap-1.5 text-zinc-700 dark:text-zinc-200">
                   <input
                     type="checkbox"
                     className="size-3.5 rounded border-zinc-300 accent-zinc-900 dark:border-zinc-600 dark:accent-zinc-100"
                     checked={pasteFormatPrompt.removeFormatting}
                     onChange={(event) =>
-                      applyPasteFormatOption(
-                        "removeFormatting",
-                        event.target.checked,
-                      )
+                      applyPasteFormatOption(event.target.checked)
                     }
                   />
                   Remove formatting
-                </label>
-                <label className="flex cursor-pointer items-center gap-1.5 text-zinc-700 dark:text-zinc-200">
-                  <input
-                    type="checkbox"
-                    className="size-3.5 rounded border-zinc-300 accent-zinc-900 dark:border-zinc-600 dark:accent-zinc-100"
-                    checked={pasteFormatPrompt.useDefaultFont}
-                    onChange={(event) =>
-                      applyPasteFormatOption(
-                        "useDefaultFont",
-                        event.target.checked,
-                      )
-                    }
-                  />
-                  Default font
-                </label>
-                <label className="flex cursor-pointer items-center gap-1.5 text-zinc-700 dark:text-zinc-200">
-                  <input
-                    type="checkbox"
-                    className="size-3.5 rounded border-zinc-300 accent-zinc-900 dark:border-zinc-600 dark:accent-zinc-100"
-                    checked={pasteFormatPrompt.useDefaultSize}
-                    onChange={(event) =>
-                      applyPasteFormatOption(
-                        "useDefaultSize",
-                        event.target.checked,
-                      )
-                    }
-                  />
-                  Default size
                 </label>
               </div>
             )}
 
             <div
               ref={editorRef}
-              contentEditable
+              contentEditable={!isHoverPreview}
               suppressContentEditableWarning
               onInput={handleEditorInput}
               onPaste={handleEditorPaste}
@@ -2088,7 +2212,9 @@ export function TaskDetailsPanel({
               onKeyDown={handleEditorKeyDown}
               onKeyUp={handleEditorKeyUp}
               onScroll={updateLineControls}
-              className="task-details-editor min-h-[650px] reounded-xl w-full resize-y overflow-auto bg-white py-2 pl-[60px] pr-3 text-[17px] leading-[1.6] text-[#333333] outline-none dark:bg-white dark:text-[#333333] [&_.detail-line[data-line-type=bullet]]:pl-1 [&_.detail-line[data-line-type=checklist]]:pl-1 [&_.detail-line[data-line-type=h1]]:text-[24px] [&_.detail-line[data-line-type=h1]]:font-bold [&_.detail-line[data-line-type=h1]]:leading-[32px] [&_.detail-line[data-line-type=h2]]:text-[1.3125rem] [&_.detail-line[data-line-type=h2]]:font-semibold [&_.detail-line[data-line-type=h2]]:leading-[1.6875rem] [&_.detail-line[data-line-type=h3]]:text-[1.125rem] [&_.detail-line[data-line-type=h3]]:font-semibold [&_.detail-line[data-line-type=h3]]:leading-[1.5rem] [&_.detail-line[data-line-type=numbered]]:pl-1 [&_mark]:bg-yellow-200 [&_s]:line-through [&_strike]:line-through [&_u]:underline"
+              className={`task-details-editor min-h-[650px] rounded-xl w-full resize-y overflow-auto py-2 pl-[60px] pr-3 text-[17px] leading-[1.6] text-[#333333] outline-none transition-colors dark:text-[#333333] [&_.detail-line[data-line-type=bullet]]:pl-1 [&_.detail-line[data-line-type=checklist]]:pl-1 [&_.detail-line[data-line-type=h1]]:text-[24px] [&_.detail-line[data-line-type=h1]]:font-bold [&_.detail-line[data-line-type=h1]]:leading-[32px] [&_.detail-line[data-line-type=h2]]:text-[1.3125rem] [&_.detail-line[data-line-type=h2]]:font-semibold [&_.detail-line[data-line-type=h2]]:leading-[1.6875rem] [&_.detail-line[data-line-type=h3]]:text-[1.125rem] [&_.detail-line[data-line-type=h3]]:font-semibold [&_.detail-line[data-line-type=h3]]:leading-[1.5rem] [&_.detail-line[data-line-type=numbered]]:pl-1 [&_mark]:bg-yellow-200 [&_s]:line-through [&_strike]:line-through [&_u]:underline ${
+                isHoverPreview ? "bg-[#faf6ff]" : "bg-white dark:bg-white"
+              }`}
             />
 
             {dropIndicator && (

@@ -41,6 +41,8 @@ type TaskListTaskRowProps = {
   taskContextMenuRef: RefObject<HTMLDivElement | null>;
   dueDateLabel: string | null;
   onTaskClick: (task: TaskListItem) => void;
+  onTaskHoverStart?: () => void;
+  onTaskHoverEnd?: (event: React.MouseEvent<HTMLLIElement>) => void;
   onTaskContextMenu: (
     event: React.MouseEvent<HTMLLIElement>,
     task: TaskListItem,
@@ -117,6 +119,8 @@ export function TaskListTaskRow({
   taskContextMenuRef,
   dueDateLabel,
   onTaskClick,
+  onTaskHoverStart,
+  onTaskHoverEnd,
   onTaskContextMenu,
   onToggleTask,
   onTitleDraftChange,
@@ -163,6 +167,7 @@ export function TaskListTaskRow({
   const priorityBorderStyle = priorityColor
     ? { borderLeftWidth: 3, borderLeftStyle: "solid" as const, borderLeftColor: priorityColor }
     : undefined;
+  const isSelected = task.id === selectedTaskId;
 
   if (isCompleting) {
     return (
@@ -184,21 +189,27 @@ export function TaskListTaskRow({
       data-task-id={task.id}
       aria-current={task.id === selectedTaskId ? "true" : undefined}
       onClick={() => onTaskClick(task)}
+      onMouseEnter={onTaskHoverStart}
+      onMouseLeave={onTaskHoverEnd}
       onContextMenu={(event) => onTaskContextMenu(event, task)}
       onPointerDown={
         showDragHandle
           ? (event) => onTaskDragStart(event, task.id)
           : undefined
       }
-      className={`group flex min-h-[35px] items-center gap-2 border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 cursor-pointer ${
+      className={`group flex min-h-[35px] items-center gap-2 rounded-[3px] border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 cursor-pointer ${
         showDragHandle ? "touch-none" : ""
+      } ${
+        isSelected
+          ? "bg-[#e9ebee]/85 hover:bg-[#e9ebee]"
+          : "hover:bg-[#faf6ff]"
       }`}
       style={{ paddingLeft: rowPaddingLeft, ...priorityBorderStyle }}
     >
       {showDragHandle ? (
         <span
           aria-hidden="true"
-          className="pointer-events-none flex size-[19px] shrink-0 items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+          className="flex size-[19px] shrink-0 cursor-move items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
         >
           <InteractIcon className="size-3.5 text-[#949494]" />
         </span>
@@ -225,7 +236,7 @@ export function TaskListTaskRow({
         />
       ) : (
         <div className="min-w-0 flex-1">
-          <span className="block truncate text-left text-sm text-zinc-900 dark:text-zinc-50">
+          <span className="block truncate text-left text-sm text-zinc-700 dark:text-zinc-50">
             {task.name}
           </span>
           {task.listName && (
@@ -236,15 +247,15 @@ export function TaskListTaskRow({
         </div>
       )}
 
-      <div className="relative flex h-7 min-w-0 shrink-0 items-center justify-end gap-1.5">
+      <div className="relative ml-auto flex h-7 min-w-11 shrink-0 items-center justify-end gap-1.5 pl-2">
         {task.labels.length > 0 ? (
           <TaskLabelPills labels={task.labels} className="max-w-[140px]" />
         ) : null}
 
         {dueDateLabel ? (
           <span
-            className={`text-xs text-zinc-400 transition-opacity dark:text-zinc-500 ${
-              isRowMenuOpen ? "opacity-0" : "group-hover:opacity-0"
+            className={`pointer-events-none absolute right-0 whitespace-nowrap text-xs text-zinc-400 transition-opacity dark:text-zinc-500 ${
+              isRowMenuOpen ? "opacity-0" : "opacity-100 group-hover:opacity-0"
             }`}
           >
             {dueDateLabel}
@@ -252,14 +263,21 @@ export function TaskListTaskRow({
         ) : null}
 
         <div
-          className={`flex items-center gap-0.5 transition-opacity ${
-            dueDateLabel || task.labels.length > 0 ? "shrink-0" : ""
-          } ${
+          className={`absolute right-0 flex items-center gap-1.5 transition-opacity ${
             isRowMenuOpen
               ? "pointer-events-auto opacity-100"
               : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
           }`}
         >
+          {dueDateLabel ? (
+            <span
+              className={`pointer-events-none whitespace-nowrap text-xs text-zinc-400 dark:text-zinc-500 ${
+                isRowMenuOpen ? "inline" : "hidden group-hover:inline"
+              }`}
+            >
+              {dueDateLabel}
+            </span>
+          ) : null}
           {hasDueDateActions ? (
             <div
               className="relative"

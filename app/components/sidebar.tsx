@@ -5,6 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import { IoIosSearch } from "react-icons/io";
 import { IoPricetagsOutline } from "react-icons/io5";
 import { LuPlus } from "react-icons/lu";
+import { BsCalendar2 } from "react-icons/bs";
+import { BsCalendar3 } from "react-icons/bs";
+
 import type { CompletedTask, SearchTask, TaskLabel, TodoList } from "./todo-app";
 import {
   getListDropIndex,
@@ -13,8 +16,11 @@ import {
 } from "./list-reorder";
 import { getLabelDotColor } from "./task-label-pills";
 import { ConfirmModal } from "./confirm-modal";
+import { MacCmdIcon } from "./mac-cmd-icon";
 import { RenameListModal } from "./rename-list-modal";
 import { ThreeDotsIcon } from "./three-dots-icon";
+import { TodayCalendarIcon } from "./today-calendar-icon";
+
 
 const SearchModal = dynamic(
   () => import("./search-modal").then((module) => module.SearchModal),
@@ -23,7 +29,6 @@ const SearchModal = dynamic(
 
 const NAV_ITEMS = [
   { label: "Search", action: "search" as const },
-  { label: "Important", action: null },
   { label: "Today", action: "today" as const },
   { label: "Next 7 days", action: "next7days" as const },
   { label: "Calendar", action: "calendar" as const },
@@ -77,7 +82,7 @@ function getItemClassName(isSelected: boolean, baseClassName = itemClassName) {
 
   return `${baseClassName} ${heightClass} ${
     isSelected
-      ? "bg-zinc-200/80 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-50"
+      ? "bg-[#e9ebee] font-medium text-[#111111] dark:bg-zinc-800 dark:text-zinc-50"
       : "text-zinc-900 hover:bg-zinc-200/60 dark:text-zinc-50 dark:hover:bg-zinc-800/60"
   }`;
 }
@@ -115,8 +120,11 @@ export function Sidebar({
   const [renameList, setRenameList] = useState<TodoList | null>(null);
   const [removeList, setRemoveList] = useState<TodoList | null>(null);
   const [isAddListOpen, setIsAddListOpen] = useState(false);
+  const [editingListId, setEditingListId] = useState<string | null>(null);
+  const [listNameDraft, setListNameDraft] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
+  const listNameInputRef = useRef<HTMLInputElement>(null);
   const dragStateRef = useRef<{
     sourceRow: HTMLElement;
     captureTarget: HTMLElement;
@@ -130,6 +138,19 @@ export function Sidebar({
   useEffect(() => {
     setOrderedLists(lists);
   }, [lists]);
+
+  useEffect(() => {
+    if (!editingListId) return;
+
+    requestAnimationFrame(() => {
+      const input = listNameInputRef.current;
+      if (!input) return;
+
+      input.focus();
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
+    });
+  }, [editingListId]);
 
   useEffect(() => {
     function handleSearchShortcut(event: KeyboardEvent) {
@@ -166,6 +187,53 @@ export function Sidebar({
   function openRemoveModal(list: TodoList) {
     setOpenMenuListId(null);
     setRemoveList(list);
+  }
+
+  function startListNameEdit(list: TodoList) {
+    setOpenMenuListId(null);
+    setEditingListId(list.id);
+    setListNameDraft(list.name);
+  }
+
+  function cancelListNameEdit(list: TodoList) {
+    setListNameDraft(list.name);
+    setEditingListId(null);
+  }
+
+  function commitListNameEdit(list: TodoList) {
+    const trimmed = listNameDraft.trim();
+
+    if (!trimmed) {
+      cancelListNameEdit(list);
+      return;
+    }
+
+    if (trimmed !== list.name) {
+      onRenameList(list.id, trimmed);
+      setOrderedLists((current) =>
+        current.map((item) =>
+          item.id === list.id ? { ...item, name: trimmed } : item,
+        ),
+      );
+    }
+
+    setEditingListId(null);
+  }
+
+  function handleListNameKeyDown(
+    event: React.KeyboardEvent<HTMLInputElement>,
+    list: TodoList,
+  ) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitListNameEdit(list);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelListNameEdit(list);
+    }
   }
 
   function handleListDragMove(event: PointerEvent) {
@@ -270,6 +338,7 @@ export function Sidebar({
     event: React.PointerEvent<HTMLDivElement>,
     listId: string,
   ) {
+    if (editingListId === listId) return;
     if (!onReorderLists || event.button !== 0) return;
     if (!shouldStartListDrag(event.target)) return;
 
@@ -289,9 +358,6 @@ export function Sidebar({
     const startY = event.clientY;
     const pointerId = event.pointerId;
     let dragStarted = false;
-
-    dragRow.style.cursor = "move";
-    document.body.style.cursor = "move";
 
     function clearPendingListeners() {
       document.removeEventListener("pointermove", onPointerMove);
@@ -315,10 +381,6 @@ export function Sidebar({
     function onPointerUp(upEvent: PointerEvent) {
       if (upEvent.pointerId !== pointerId) return;
       clearPendingListeners();
-      if (!dragStarted) {
-        dragRow.style.cursor = "";
-        document.body.style.cursor = "";
-      }
     }
 
     document.addEventListener("pointermove", onPointerMove);
@@ -327,6 +389,7 @@ export function Sidebar({
   }
 
   function handleListClick(listId: string) {
+    if (editingListId === listId) return;
     if (suppressListClickRef.current) {
       suppressListClickRef.current = false;
       return;
@@ -339,7 +402,16 @@ export function Sidebar({
     <>
       <aside className="flex w-[250px] shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
         <nav className="flex flex-col">
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.map((item) => {
+            const isNavItemSelected =
+              (item.action === "today" && isTodaySelected) ||
+              (item.action === "next7days" && isNext7DaysSelected) ||
+              (item.action === "calendar" && isCalendarSelected);
+            const navIconColor = isNavItemSelected
+              ? "text-[#111111]"
+              : "text-[#7c92a0]";
+
+            return (
             <button
               key={item.label}
               type="button"
@@ -354,18 +426,54 @@ export function Sidebar({
                         ? () => setIsSearchOpen(true)
                         : undefined
               }
-              className={`${getItemClassName(
-                (item.action === "today" && isTodaySelected) ||
-                  (item.action === "next7days" && isNext7DaysSelected) ||
-                  (item.action === "calendar" && isCalendarSelected),
-              )} gap-2 px-4`}
+              className={
+                item.action === "search"
+                  ? "ml-2 mr-[6px] mt-3 mb-1 flex h-[35px] w-auto cursor-pointer items-center gap-2 self-stretch rounded-full border border-[#eae8f0] py-0 pl-3 pr-[3px] text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800/60"
+             
+                  : `${getItemClassName(isNavItemSelected)} gap-2 px-4`
+              }
             >
               {item.action === "search" ? (
-                <IoIosSearch className="size-[18px] shrink-0 cursor-pointer" aria-hidden="true" />
+                <IoIosSearch
+                  className="size-[18px] shrink-0 cursor-pointer"
+                  aria-hidden="true"
+                />
+              ) : null}
+              {item.action === "today" ? (
+                <TodayCalendarIcon
+                  // className={`size-[21px] -ml-[3px] shrink-0 text-[#7c92a0]`}
+                  className={`size-[20px] -ml-[2px] shrink-0 ${navIconColor}`}
+                />
+              ) : null}
+              {item.action === "next7days" ? (
+                <BsCalendar2
+                  className={`size-[15px] shrink-0 ${navIconColor}`}
+                  aria-hidden="true"
+                />
+              ) : null}
+              {item.action === "calendar" ? (
+                <BsCalendar3
+                  className={`size-[15px] shrink-0 ${navIconColor}`}
+                  aria-hidden="true"
+                />
               ) : null}
               {item.label}
+              {item.action === "search" ? (
+                <div
+                  className="ml-auto flex size-[28px] shrink-0 items-center justify-center rounded-full bg-[#eceff4]/75"
+                  aria-hidden="true"
+                >
+                  <div className="flex items-center gap-px text-[#a1a7be]/50">
+                    <MacCmdIcon className="size-[9px] shrink-0" />
+                    <span className="text-[9px] font-bold leading-none text-[#a1a7ae]/65">
+                      +K
+                    </span>
+                  </div>
+                </div>
+              ) : null}
             </button>
-          ))}
+            );
+          })}
           
           <hr className="my-2 border-zinc-200 dark:border-zinc-800" />
           <div className="flex flex-col gap-2 px-4 pb-1 text-xs font-medium text-zinc-400 dark:text-zinc-500">Lists</div>
@@ -382,18 +490,42 @@ export function Sidebar({
               data-list-id={list.id}
               onPointerDown={(event) => handleListPointerDown(event, list.id)}
               onClick={() => handleListClick(list.id)}
-              className={`group relative flex h-[35px] items-center touch-none cursor-pointer ${
+              className={`group relative flex h-[35px] items-center touch-none rounded-[3px] cursor-pointer ${
                 !isTodaySelected &&
                 !isNext7DaysSelected &&
                 !isCalendarSelected &&
                 !selectedLabelId &&
                 list.id === selectedListId
-                  ? "bg-zinc-200/80 dark:bg-zinc-800"
+                  ? "bg-[#e9ebee]/95 dark:bg-zinc-800"
                   : "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60"
               }`}
             >
-              <div className="flex min-w-0 flex-1 items-center gap-2 px-4 text-left text-sm text-zinc-900 dark:text-zinc-50">
-                <span className="min-w-0 flex-1 truncate">{list.name}</span>
+              <div className="flex min-w-0 flex-1 items-center gap-2 px-4 text-left text-sm text-zinc-800 dark:text-zinc-50">
+                {editingListId === list.id ? (
+                  <input
+                    ref={listNameInputRef}
+                    type="text"
+                    value={listNameDraft}
+                    onChange={(event) => setListNameDraft(event.target.value)}
+                    onClick={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    onBlur={() => commitListNameEdit(list)}
+                    onKeyDown={(event) => handleListNameKeyDown(event, list)}
+                    aria-label={`Rename ${list.name}`}
+                    className="min-w-0 flex-1 bg-transparent text-sm text-zinc-800 outline-none cursor-text dark:text-zinc-50"
+                  />
+                ) : (
+                  <span
+                    className="min-w-0 flex-1 truncate cursor-pointer"
+                    onDoubleClick={(event) => {
+                      event.stopPropagation();
+                      startListNameEdit(list);
+                    }}
+                  >
+                    {list.name}
+                  </span>
+                )}
                 <span className="shrink-0 pr-1 text-xs tabular-nums text-zinc-400 transition-[padding] group-hover:pr-8 dark:text-zinc-500">
                   {taskCountByListId[list.id] ?? 0}
                 </span>
@@ -452,7 +584,7 @@ export function Sidebar({
             onClick={() => setIsAddListOpen(true)}
           >
             New list
-            <LuPlus className="size-3.5 text-zinc-250 group-hover:text-zinc-600 shrink-0" aria-hidden="true" />
+            <LuPlus className="size-3.5 text-[#d0d5dc] group-hover:text-zinc-600 shrink-0" aria-hidden="true" />
           </button>
 
           {labels.length > 0 ? (

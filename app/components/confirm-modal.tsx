@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
+import { createPortal } from "react-dom";
+
 type ConfirmModalProps = {
   open: boolean;
   title: string;
@@ -17,15 +20,33 @@ export function ConfirmModal({
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
+  useEffect(() => {
+    if (!open) return;
+
+    const previousCursor = document.body.style.cursor;
+    document.body.style.cursor = "";
+
+    return () => {
+      document.body.style.cursor = previousCursor;
+    };
+  }, [open]);
+
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex cursor-default items-center justify-center bg-black/40 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-modal-title"
-        className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900"
+        className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900 [&_button]:cursor-pointer"
       >
         <h2
           id="confirm-modal-title"
@@ -38,7 +59,7 @@ export function ConfirmModal({
           <button
             type="button"
             onClick={onCancel}
-            className="h-[35px] rounded-md px-4 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="h-[35px] rounded-md px-4 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 cursor-pointer"
           >
             Cancel
           </button>
@@ -51,6 +72,7 @@ export function ConfirmModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

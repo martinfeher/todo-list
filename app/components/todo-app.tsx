@@ -19,8 +19,9 @@ import {
   updateTaskPinned as updateTaskPinnedInDb,
 } from "@/app/actions/todo";
 import type { TaskDueTime } from "@/lib/task-due-time";
+import { taskDetailsHasContent } from "@/lib/task-details-content";
 import { Sidebar } from "./sidebar";
-import { CalendarPanel } from "./calendar-panel";
+import { CalendarPanel, CalendarMonthView } from "./calendar-panel";
 import { TaskDetailsPanel } from "./task-details-panel";
 import { TaskListPanel } from "./task-list-panel";
 import { mergeReorderedPinnedTasks, mergeReorderedUnpinnedTasks } from "./task-reorder";
@@ -37,6 +38,7 @@ export type Task = {
   name: string;
   completed: boolean;
   details: string;
+  hasDetails: boolean;
   dueDate: string | null;
   dueTimeMinutes: number | null;
   dueDurationMinutes: number | null;
@@ -80,6 +82,7 @@ function withPinnedDefaults(tasksByList: Record<string, Task[]>) {
       listId,
       tasks.map((task) => ({
         ...task,
+        hasDetails: task.hasDetails ?? false,
         pinned: Boolean(task.pinned),
         parentId: task.parentId ?? null,
         labels: task.labels ?? [],
@@ -245,6 +248,7 @@ export function TodoApp({
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
   const [focusNoteAtEndRequest, setFocusNoteAtEndRequest] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>(null);
   const [tasksByList, setTasksByList] = useState(() =>
@@ -256,6 +260,18 @@ export function TodoApp({
   );
   const undoTimerRef = useRef<number | null>(null);
   const completionTimerRef = useRef<Record<string, number>>({});
+  const [isListCalendarOpen, setIsListCalendarOpen] = useState(false);
+  const listCalendarButtonRef = useRef<HTMLButtonElement>(null);
+  const listCalendarPanelRef = useRef<HTMLDivElement>(null);
+  const listCalendarReturnTaskIdRef = useRef<string | null>(null);
+  const listCalendarCloseTimerRef = useRef<number | null>(null);
+
+  const displayedTaskId =
+    hoveredTaskId && hoveredTaskId !== selectedTaskId
+      ? hoveredTaskId
+      : selectedTaskId;
+  const isHoverPreview =
+    hoveredTaskId !== null && hoveredTaskId !== selectedTaskId;
 
   const selectedList = lists.find((list) => list.id === selectedListId) ?? null;
   const selectedLabel =
@@ -515,6 +531,7 @@ export function TodoApp({
       name: task.name,
       completed: task.completed,
       details: task.details,
+      hasDetails: taskDetailsHasContent(task.details),
       dueDate: null,
       dueTimeMinutes: null,
       dueDurationMinutes: null,
@@ -609,18 +626,58 @@ export function TodoApp({
   }
 
   const handleDetailsSaved = useCallback((taskId: string, details: string) => {
+    const hasDetails = taskDetailsHasContent(details);
     setTasksByList((current) => {
       const next = { ...current };
 
       for (const listId of Object.keys(next)) {
         next[listId] = next[listId].map((task) =>
-          task.id === taskId ? { ...task, details } : task,
+          task.id === taskId ? { ...task, details, hasDetails } : task,
         );
       }
 
       return next;
     });
   }, []);
+
+  const handleTaskHoverStart = useCallback(
+    (taskId: string) => {
+      if (taskId === selectedTaskId) {
+        setHoveredTaskId(null);
+        return;
+      }
+
+      for (const listTasks of Object.values(tasksByList)) {
+        const task = listTasks.find((item) => item.id === taskId);
+        if (!task) continue;
+
+        if (task.hasDetails) {
+          setHoveredTaskId(taskId);
+        } else {
+          setHoveredTaskId(null);
+        }
+        return;
+      }
+    },
+    [selectedTaskId, tasksByList],
+  );
+
+  const handleTaskHasDetailsKnown = useCallback(
+    (taskId: string, hasDetails: boolean) => {
+      setTasksByList((current) => {
+        const next = { ...current };
+
+        for (const listId of Object.keys(next)) {
+          next[listId] = next[listId].map((task) =>
+            task.id === taskId ? { ...task, hasDetails } : task,
+          );
+        }
+
+        return next;
+      });
+    },
+    [],
+  );
 
   const handleTaskRenamed = useCallback((taskId: string, name: string) => {
     setTasksByList((current) => {
@@ -877,7 +934,87 @@ export function TodoApp({
     await reorderTasksInDb(listId, mergedTaskIds, parentUpdates);
   }
 
-  const showDetailsPanel = selectedTaskId !== null;
+  const cancelListCalendarClose = useCallback(() => {
+    if (listCalendarCloseTimerRef.current !== null) {
+      window.clearTimeout(listCalendarCloseTimerRef.current);
+      listCalendarCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const closeListCalendar = useCallback(() => {
+    cancelListCalendarClose();
+    setIsListCalendarOpen(false);
+
+    const returnTaskId = listCalendarReturnTaskIdRef.current;
+    listCalendarReturnTaskIdRef.current = null;
+
+    if (returnTaskId) {
+      setSelectedTaskId(returnTaskId);
+    }
+  }, [cancelListCalendarClose]);
+
+  const scheduleListCalendarClose = useCallback(() => {
+    cancelListCalendarClose();
+    listCalendarCloseTimerRef.current = window.setTimeout(() => {
+      closeListCalendar();
+    }, 120);
+  }, [cancelListCalendarClose, closeListCalendar]);
+
+  const openListCalendar = useCallback(() => {
+    if (!selectedListId) return;
+
+    cancelListCalendarClose();
+    listCalendarReturnTaskIdRef.current = selectedTaskId;
+    setIsListCalendarOpen(true);
+  }, [cancelListCalendarClose, selectedListId, selectedTaskId]);
+
+  const handleListCalendarButtonMouseLeave = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      const panel = listCalendarPanelRef.current;
+      const relatedTarget = event.relatedTarget as Node | null;
+
+      if (relatedTarget && panel?.contains(relatedTarget)) {
+        return;
+      }
+
+      scheduleListCalendarClose();
+    },
+    [scheduleListCalendarClose],
+  );
+
+  const handleListCalendarPanelMouseLeave = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const button = listCalendarButtonRef.current;
+      const relatedTarget = event.relatedTarget as Node | null;
+
+      if (relatedTarget && button?.contains(relatedTarget)) {
+        return;
+      }
+
+      scheduleListCalendarClose();
+    },
+    [scheduleListCalendarClose],
+  );
+
+  useEffect(() => {
+    setIsListCalendarOpen(false);
+    listCalendarReturnTaskIdRef.current = null;
+    cancelListCalendarClose();
+    setHoveredTaskId(null);
+  }, [selectedListId, cancelListCalendarClose]);
+
+  useEffect(() => {
+    setHoveredTaskId(null);
+  }, [selectedLabelId, activeView]);
+
+  useEffect(() => {
+    return () => {
+      cancelListCalendarClose();
+    };
+  }, [cancelListCalendarClose]);
+
+  const showRightPanel = displayedTaskId !== null || isListCalendarOpen;
+  const showTaskDetails = displayedTaskId !== null && !isListCalendarOpen;
 
   const selectedTaskSnapshot = useMemo(() => {
     if (!selectedTaskId) return null;
@@ -950,7 +1087,7 @@ export function TodoApp({
               lists={lists}
               completingTaskIds={completingTaskIds}
               selectedTaskId={selectedTaskId}
-              expanded={!showDetailsPanel}
+              expanded={!showRightPanel}
               showAddTask={selectedListId !== null}
               isLabelFilter={selectedLabelId !== null}
               listId={selectedListId}
@@ -967,13 +1104,38 @@ export function TodoApp({
               onToggleTaskLabel={toggleTaskLabel}
               onLabelsChanged={refreshLabels}
               onMoveTaskToList={moveTaskToList}
+              onTaskHoverStart={handleTaskHoverStart}
+              onTaskHoverEnd={() => setHoveredTaskId(null)}
+              showListCalendarButton={selectedListId !== null}
+              listCalendarButtonRef={listCalendarButtonRef}
+              onListCalendarHoverStart={openListCalendar}
+              onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
             />
-            {showDetailsPanel && (
+            {isListCalendarOpen && (
+              <div
+                ref={listCalendarPanelRef}
+                onMouseEnter={cancelListCalendarClose}
+                onMouseLeave={handleListCalendarPanelMouseLeave}
+                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                <CalendarMonthView
+                  tasks={taskListItems}
+                  selectedTaskId={selectedTaskId}
+                  onSelectTask={setSelectedTaskId}
+                  onToggleTask={toggleTask}
+                  onSetTaskDueDate={setTaskDueDate}
+                  onSetTaskDueTime={setTaskDueTime}
+                />
+              </div>
+            )}
+            {showTaskDetails && (
               <TaskDetailsPanel
-                taskId={selectedTaskId}
-                taskSnapshot={selectedTaskSnapshot}
+                taskId={displayedTaskId}
+                isHoverPreview={isHoverPreview}
+                taskSnapshot={isHoverPreview ? null : selectedTaskSnapshot}
                 focusNoteAtEndRequest={focusNoteAtEndRequest}
                 onDetailsSaved={handleDetailsSaved}
+                onTaskHasDetailsKnown={handleTaskHasDetailsKnown}
                 onTaskRenamed={handleTaskRenamed}
                 onDueDateUpdated={handleDueDateUpdated}
               />
