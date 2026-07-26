@@ -111,6 +111,7 @@ export async function getTodoData() {
             dueTimeZone,
             tags,
             pinned,
+            parentId,
           }) => ({
           id,
           name,
@@ -123,6 +124,7 @@ export async function getTodoData() {
           priority: getPriorityFromTaskTags(tags),
           tags: getLabelTagsFromTaskTags(tags),
           pinned: Boolean(pinned),
+          parentId: parentId ?? null,
         }),
         ),
       ]),

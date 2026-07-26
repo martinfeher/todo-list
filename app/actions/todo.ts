@@ -461,7 +461,7 @@ export async function createTask(listId: string, name: string) {
 export async function moveTaskToList(taskId: string, targetListId: string) {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
-    select: { listId: true },
+    select: { listId: true, parentId: true },
   });
 
   if (!task || task.listId === targetListId) {
@@ -469,20 +469,34 @@ export async function moveTaskToList(taskId: string, targetListId: string) {
   }
 
   const sourceListId = task.listId;
+  const childIds = task.parentId
+    ? []
+    : (
+        await prisma.task.findMany({
+          where: { parentId: taskId },
+          select: { id: true },
+        })
+      ).map((child) => child.id);
+  const movingIds = [taskId, ...childIds];
 
   await prisma.$transaction(async (tx) => {
     await tx.task.updateMany({
       where: { listId: targetListId },
-      data: { position: { increment: 1 } },
+      data: { position: { increment: movingIds.length } },
     });
 
-    await tx.task.update({
-      where: { id: taskId },
-      data: {
-        listId: targetListId,
-        position: 0,
-      },
-    });
+    await Promise.all(
+      movingIds.map((id, position) =>
+        tx.task.update({
+          where: { id },
+          data: {
+            listId: targetListId,
+            position,
+            ...(id === taskId && task.parentId ? { parentId: null } : {}),
+          },
+        }),
+      ),
+    );
 
     const sourceTasks = await tx.task.findMany({
       where: { listId: sourceListId },
@@ -503,7 +517,16 @@ export async function moveTaskToList(taskId: string, targetListId: string) {
   revalidatePath("/");
 }
 
-export async function reorderTasks(listId: string, taskIds: string[]) {
+export type TaskParentUpdate = {
+  taskId: string;
+  parentId: string | null;
+};
+
+export async function reorderTasks(
+  listId: string,
+  taskIds: string[],
+  parentUpdates: TaskParentUpdate[] = [],
+) {
   const tasks = await prisma.task.findMany({
     where: { listId },
     select: { id: true },
@@ -531,14 +554,45 @@ export async function reorderTasks(listId: string, taskIds: string[]) {
     throw new Error("Invalid task order payload");
   }
 
-  await prisma.$transaction(
-    orderedIds.map((id, position) =>
+  const validParentUpdates = parentUpdates.filter((update) =>
+    validIds.has(update.taskId),
+  );
+
+  for (const update of validParentUpdates) {
+    if (!update.parentId) continue;
+
+    if (!validIds.has(update.parentId)) {
+      throw new Error("Invalid parent task");
+    }
+
+    if (update.parentId === update.taskId) {
+      throw new Error("Task cannot be its own parent");
+    }
+
+    const parentTask = await prisma.task.findUnique({
+      where: { id: update.parentId },
+      select: { parentId: true },
+    });
+
+    if (parentTask?.parentId) {
+      throw new Error("Nested subtasks are not supported");
+    }
+  }
+
+  await prisma.$transaction([
+    ...orderedIds.map((id, position) =>
       prisma.task.update({
         where: { id },
         data: { position },
       }),
     ),
-  );
+    ...validParentUpdates.map(({ taskId, parentId }) =>
+      prisma.task.update({
+        where: { id: taskId },
+        data: { parentId },
+      }),
+    ),
+  ]);
 
   revalidatePath("/");
 }

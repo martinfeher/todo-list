@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { BiSortAlt2 } from "react-icons/bi";
 import { LuPlus } from "react-icons/lu";
+import { PiArrowBendDownRight } from "react-icons/pi";
 import { createLabelTag, getLabelTags } from "@/app/actions/todo";
 import { TaskListTaskRow } from "./task-list-task-row";
 import type { LabelTag } from "./task-tag-selector";
@@ -13,9 +14,21 @@ import {
 import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
 import {
+  buildVisibleTasks,
+  clampSubtaskKeepDropIndex,
+  collectParentUpdates,
+  getDragBlockIds,
+  getDropIndicatorIndent,
+  reorderVisibleTaskIds,
+  resolveHierarchyDragIntent,
+  SUBTASK_INDENT_PX,
+  SUBTASK_ICON_INDENT_PX,
+  SUBTASK_ROOT_LEFT_PX,
+  type HierarchyDragIntent,
+} from "@/lib/task-subtasks";
+import {
   getTaskDropIndex,
   getTaskRowElements,
-  reorderTaskIds,
 } from "./task-reorder";
 
 type SortField = "date" | "title";
@@ -30,6 +43,7 @@ type SortOption = {
 type DropIndicatorState = {
   top: number;
   section: "pinned" | "unpinned";
+  indent: number;
 };
 
 type TaskDragState = {
@@ -37,9 +51,13 @@ type TaskDragState = {
   captureTarget: HTMLElement;
   sourceIndex: number;
   dropIndex: number;
+  sourceTaskId: string;
   taskIds: string[];
+  blockIds: string[];
   pointerId: number;
   section: "pinned" | "unpinned";
+  hierarchyIntent: HierarchyDragIntent;
+  sourceParentId: string | null;
 };
 
 const SORT_OPTIONS: SortOption[] = [
@@ -164,6 +182,7 @@ type TaskListPanelProps = {
     listId: string,
     taskIds: string[],
     section: "pinned" | "unpinned",
+    parentUpdates?: Array<{ taskId: string; parentId: string | null }>,
   ) => void;
   onSetTaskDueDate?: (taskId: string, dateValue: string | null) => void;
   onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
@@ -299,6 +318,27 @@ export function TaskListPanel({
         ? orderedTasks.filter((task) => !Boolean(task.pinned))
         : orderedTasks,
     [orderedTasks, showAddTask],
+  );
+
+  const pinnedVisibleTasks = useMemo(
+    () =>
+      canReorder
+        ? buildVisibleTasks(orderedTasks, true)
+        : pinnedTasks.map((task) => ({ ...task, depth: 0 })),
+    [canReorder, orderedTasks, pinnedTasks],
+  );
+
+  const unpinnedVisibleTasks = useMemo(
+    () =>
+      canReorder
+        ? buildVisibleTasks(orderedTasks, false)
+        : listTasks.map((task) => ({ ...task, depth: 0 })),
+    [canReorder, listTasks, orderedTasks],
+  );
+
+  const tasksById = useMemo(
+    () => new Map(orderedTasks.map((task) => [task.id, task])),
+    [orderedTasks],
   );
 
   useEffect(() => {
@@ -756,14 +796,36 @@ export function TaskListPanel({
     if (!list) return;
 
     const rows = getTaskRowElements(list);
-    const dropIndex = getTaskDropIndex(
+    let dropIndex = getTaskDropIndex(
       event.clientY,
       rows,
       dragState.sourceIndex,
     );
-    dragState.dropIndex = dropIndex;
 
     const listRect = list.getBoundingClientRect();
+    const hasChildBlock = dragState.blockIds.length > 1;
+    const sourceParentId = dragState.sourceParentId;
+    const hierarchyIntent = hasChildBlock
+      ? "root"
+      : resolveHierarchyDragIntent(
+          event.clientX,
+          listRect.left,
+          sourceParentId,
+        );
+    dragState.hierarchyIntent = hierarchyIntent;
+
+    if (sourceParentId && hierarchyIntent === "keep") {
+      dropIndex = clampSubtaskKeepDropIndex(
+        dragState.taskIds,
+        dragState.sourceIndex,
+        dropIndex,
+        sourceParentId,
+        tasksById,
+      );
+    }
+
+    dragState.dropIndex = dropIndex;
+
     let indicatorTop: number;
 
     if (dropIndex >= rows.length) {
@@ -777,24 +839,37 @@ export function TaskListPanel({
       indicatorTop = rect.top - listRect.top;
     }
 
-    setDropIndicator({ top: indicatorTop, section: dragState.section });
+    const indent = getDropIndicatorIndent(
+      hierarchyIntent,
+      dropIndex,
+      sourceParentId,
+    );
+
+    setDropIndicator({ top: indicatorTop, section: dragState.section, indent });
   }
 
   function beginTaskDrag(
     sourceRow: HTMLElement,
     pointerId: number,
     sourceIndex: number,
+    sourceTaskId: string,
     taskIds: string[],
+    blockIds: string[],
     section: "pinned" | "unpinned",
+    sourceParentId: string | null,
   ) {
     dragStateRef.current = {
       sourceRow,
       captureTarget: sourceRow,
       sourceIndex,
       dropIndex: sourceIndex,
+      sourceTaskId,
       taskIds,
+      blockIds,
       pointerId,
       section,
+      hierarchyIntent: sourceParentId ? "keep" : "root",
+      sourceParentId,
     };
 
     sourceRow.classList.add("opacity-50");
@@ -824,14 +899,48 @@ export function TaskListPanel({
     setDropIndicator(null);
 
     if (dragState && listId && onReorderTasks) {
-      const nextIds = reorderTaskIds(
+      let dropIndex = dragState.dropIndex;
+
+      if (
+        dragState.sourceParentId &&
+        dragState.hierarchyIntent === "keep"
+      ) {
+        dropIndex = clampSubtaskKeepDropIndex(
+          dragState.taskIds,
+          dragState.sourceIndex,
+          dropIndex,
+          dragState.sourceParentId,
+          tasksById,
+        );
+      }
+
+      const nextIds = reorderVisibleTaskIds(
         dragState.taskIds,
         dragState.sourceIndex,
-        dragState.dropIndex,
+        dropIndex,
+        dragState.blockIds,
       );
 
-      if (nextIds.join(",") !== dragState.taskIds.join(",")) {
-        onReorderTasks(listId, nextIds, dragState.section);
+      const orderChanged = nextIds.join(",") !== dragState.taskIds.join(",");
+      const hierarchyIntentByTaskId = new Map([
+        [dragState.sourceTaskId, dragState.hierarchyIntent],
+      ]);
+      const parentUpdates = collectParentUpdates(
+        orderedTasks,
+        nextIds,
+        [dragState.sourceTaskId],
+        hierarchyIntentByTaskId,
+        tasksById,
+      );
+      const parentChanged = parentUpdates.length > 0;
+
+      if (orderChanged || parentChanged) {
+        onReorderTasks(
+          listId,
+          nextIds,
+          dragState.section,
+          parentUpdates,
+        );
       }
     }
 
@@ -862,10 +971,11 @@ export function TaskListPanel({
     const sourceIndex = rows.indexOf(dragRow);
     if (sourceIndex < 0) return;
 
-    const taskIds =
-      section === "pinned"
-        ? pinnedTasks.map((task) => task.id)
-        : listTasks.map((task) => task.id);
+    const visibleTasks =
+      section === "pinned" ? pinnedVisibleTasks : unpinnedVisibleTasks;
+    const taskIds = visibleTasks.map((task) => task.id);
+    const blockIds = getDragBlockIds(taskIds, sourceIndex, tasksById);
+    const sourceParentId = tasksById.get(taskId)?.parentId ?? null;
 
     const startX = event.clientX;
     const startY = event.clientY;
@@ -889,7 +999,16 @@ export function TaskListPanel({
 
       dragStarted = true;
       clearPendingListeners();
-      beginTaskDrag(dragRow, pointerId, sourceIndex, taskIds, section);
+      beginTaskDrag(
+        dragRow,
+        pointerId,
+        sourceIndex,
+        taskId,
+        taskIds,
+        blockIds,
+        section,
+        sourceParentId,
+      );
     }
 
     function onPointerUp(upEvent: PointerEvent) {
@@ -903,78 +1022,107 @@ export function TaskListPanel({
   }
 
   function renderTaskItems(
-    taskItems: TaskListItem[],
+    taskItems: Array<TaskListItem & { depth?: number }>,
     section: "pinned" | "unpinned",
   ) {
     const hasTagActions = Boolean(onToggleTaskLabelTag);
     const hasMoveActions = Boolean(onMoveTaskToList) && lists.length > 1;
 
-    return taskItems.map((task) => (
-      <TaskListTaskRow
-        key={task.id}
-        task={task}
-        isCompleting={completingTaskIds.has(task.id)}
-        selectedTaskId={selectedTaskId}
-        editingTaskId={editingTaskId}
-        titleDraft={titleDraft}
-        titleInputRef={titleInputRef}
-        showDragHandle={canReorder}
-        openDatePickerTaskId={openDatePickerTaskId}
-        openMenuTaskId={openMenuTaskId}
-        openPriorityMenuTaskId={openPriorityMenuTaskId}
-        openTagMenuTaskId={openTagMenuTaskId}
-        openMoveMenuTaskId={openMoveMenuTaskId}
-        lists={lists}
-        currentListId={resolveTaskListId(task)}
-        moveQuery={moveQuery}
-        availableTags={availableTags}
-        assignedTagIds={assignedTagIds}
-        tagQuery={tagQuery}
-        isTagSubmitting={isTagSubmitting}
-        taskDateMenuRef={taskDateMenuRef}
-        taskContextMenuRef={taskContextMenuRef}
-        dueDateLabel={formatTaskDueDateLabel(task.dueDate)}
-        onTaskClick={handleTaskClick}
-        onTaskContextMenu={handleTaskContextMenu}
-        onToggleTask={onToggleTask}
-        onTitleDraftChange={(taskId, value) => {
-          setTitleDraft(value);
-          onTaskNameChange?.(taskId, value);
-        }}
-        onCommitTitleEdit={(item) => {
-          if (!titleEditReadyRef.current) return;
-          commitTitleEdit(item);
-        }}
-        onTitleKeyDown={handleTitleKeyDown}
-        onTaskDragStart={(event, taskId) =>
-          handleRowPointerDown(event, taskId, section)
-        }
-        onToggleDatePicker={toggleDatePicker}
-        onSelectTaskDueDate={handleSelectTaskDueDate}
-        onSaveTaskDueTime={handleSaveTaskDueTime}
-        onToggleTaskMenu={toggleTaskMenu}
-        onStartTitleEdit={startTitleEdit}
-        onToggleTaskPinned={handleToggleTaskPinned}
-        onOpenPriorityMenu={openPriorityMenu}
-        onOpenTagMenu={openTagMenu}
-        onOpenMoveMenu={openMoveMenu}
-        onMoveQueryChange={setMoveQuery}
-        onMoveTaskToList={handleMoveTaskToList}
-        onTagQueryChange={setTagQuery}
-        onToggleTag={(tagId) => handleToggleTag(task.id, tagId)}
-        onCreateTag={(label) => handleCreateTag(task.id, label)}
-        onClearTaskDueDate={handleClearTaskDueDate}
-        onSelectTaskPriority={handleSelectTaskPriority}
-        onClearTaskPriority={handleClearTaskPriority}
-        onConfirmTags={handleConfirmTags}
-        onCloseTaskMenu={closeTaskMenus}
-        hasDueDateActions={Boolean(onSetTaskDueDate)}
-        hasPriorityActions={Boolean(onSetTaskPriority)}
-        hasPinActions={Boolean(onSetTaskPinned)}
-        hasTagActions={hasTagActions}
-        hasMoveActions={hasMoveActions}
-      />
-    ));
+    return taskItems.flatMap((task, index) => {
+      const depth = task.depth ?? 0;
+      const previousTask = index > 0 ? taskItems[index - 1] : null;
+      const showSubtaskConnector =
+        depth === 1 &&
+        previousTask &&
+        (previousTask.depth ?? 0) === 0 &&
+        task.parentId === previousTask.id;
+
+      const row = (
+        <TaskListTaskRow
+          key={task.id}
+          task={task}
+          depth={depth}
+          isCompleting={completingTaskIds.has(task.id)}
+          selectedTaskId={selectedTaskId}
+          editingTaskId={editingTaskId}
+          titleDraft={titleDraft}
+          titleInputRef={titleInputRef}
+          showDragHandle={canReorder}
+          openDatePickerTaskId={openDatePickerTaskId}
+          openMenuTaskId={openMenuTaskId}
+          openPriorityMenuTaskId={openPriorityMenuTaskId}
+          openTagMenuTaskId={openTagMenuTaskId}
+          openMoveMenuTaskId={openMoveMenuTaskId}
+          lists={lists}
+          currentListId={resolveTaskListId(task)}
+          moveQuery={moveQuery}
+          availableTags={availableTags}
+          assignedTagIds={assignedTagIds}
+          tagQuery={tagQuery}
+          isTagSubmitting={isTagSubmitting}
+          taskDateMenuRef={taskDateMenuRef}
+          taskContextMenuRef={taskContextMenuRef}
+          dueDateLabel={formatTaskDueDateLabel(task.dueDate)}
+          onTaskClick={handleTaskClick}
+          onTaskContextMenu={handleTaskContextMenu}
+          onToggleTask={onToggleTask}
+          onTitleDraftChange={(taskId, value) => {
+            setTitleDraft(value);
+            onTaskNameChange?.(taskId, value);
+          }}
+          onCommitTitleEdit={(item) => {
+            if (!titleEditReadyRef.current) return;
+            commitTitleEdit(item);
+          }}
+          onTitleKeyDown={handleTitleKeyDown}
+          onTaskDragStart={(event, taskId) =>
+            handleRowPointerDown(event, taskId, section)
+          }
+          onToggleDatePicker={toggleDatePicker}
+          onSelectTaskDueDate={handleSelectTaskDueDate}
+          onSaveTaskDueTime={handleSaveTaskDueTime}
+          onToggleTaskMenu={toggleTaskMenu}
+          onStartTitleEdit={startTitleEdit}
+          onToggleTaskPinned={handleToggleTaskPinned}
+          onOpenPriorityMenu={openPriorityMenu}
+          onOpenTagMenu={openTagMenu}
+          onOpenMoveMenu={openMoveMenu}
+          onMoveQueryChange={setMoveQuery}
+          onMoveTaskToList={handleMoveTaskToList}
+          onTagQueryChange={setTagQuery}
+          onToggleTag={(tagId) => handleToggleTag(task.id, tagId)}
+          onCreateTag={(label) => handleCreateTag(task.id, label)}
+          onClearTaskDueDate={handleClearTaskDueDate}
+          onSelectTaskPriority={handleSelectTaskPriority}
+          onClearTaskPriority={handleClearTaskPriority}
+          onConfirmTags={handleConfirmTags}
+          onCloseTaskMenu={closeTaskMenus}
+          hasDueDateActions={Boolean(onSetTaskDueDate)}
+          hasPriorityActions={Boolean(onSetTaskPriority)}
+          hasPinActions={Boolean(onSetTaskPinned)}
+          hasTagActions={hasTagActions}
+          hasMoveActions={hasMoveActions}
+        />
+      );
+
+      if (!showSubtaskConnector) {
+        return [row];
+      }
+
+      return [
+        <li
+          key={`${task.id}-subtask-connector`}
+          aria-hidden="true"
+          className="flex h-4 items-center border-b border-zinc-100 py-0 pr-2 dark:border-zinc-900"
+          style={{
+            paddingLeft: SUBTASK_ROOT_LEFT_PX + SUBTASK_INDENT_PX + SUBTASK_ICON_INDENT_PX,
+          }}
+        >
+          <PiArrowBendDownRight className="size-3.5 text-zinc-400 dark:text-zinc-500" />
+        </li>,
+        row,
+      ];
+    });
   }
 
   const pointerMenuTask = pointerContextMenu
@@ -1077,7 +1225,7 @@ export function TaskListPanel({
             </div>
           </div>
 
-          {showAddTask && pinnedTasks.length > 0 && (
+          {showAddTask && pinnedVisibleTasks.length > 0 && (
             <div className="border-b border-zinc-200 bg-zinc-50/80 dark:border-zinc-700 dark:bg-zinc-900/40">
               <p className="px-4 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                 Pinned
@@ -1085,11 +1233,14 @@ export function TaskListPanel({
               <ul ref={pinnedListRef} className="relative flex flex-col">
                 {dropIndicator?.section === "pinned" && (
                   <div
-                    className="pointer-events-none absolute right-4 left-4 z-20 h-0.5 bg-blue-500"
-                    style={{ top: dropIndicator.top }}
+                    className="pointer-events-none absolute right-4 z-20 h-0.5 bg-blue-500"
+                    style={{
+                      top: dropIndicator.top,
+                      left: 16 + dropIndicator.indent,
+                    }}
                   />
                 )}
-                {renderTaskItems(pinnedTasks, "pinned")}
+                {renderTaskItems(pinnedVisibleTasks, "pinned")}
               </ul>
             </div>
           )}
@@ -1097,19 +1248,22 @@ export function TaskListPanel({
           <ul
             ref={listRef}
             className={`relative flex flex-col ${
-              showAddTask && pinnedTasks.length > 0
+              showAddTask && pinnedVisibleTasks.length > 0
                 ? "border-t border-zinc-200 dark:border-zinc-700"
                 : ""
             }`}
           >
             {dropIndicator?.section === "unpinned" && (
               <div
-                className="pointer-events-none absolute right-4 left-4 z-20 h-0.5 bg-blue-500"
-                style={{ top: dropIndicator.top }}
+                className="pointer-events-none absolute right-4 z-20 h-0.5 bg-blue-500"
+                style={{
+                  top: dropIndicator.top,
+                  left: 16 + dropIndicator.indent,
+                }}
               />
             )}
 
-            {listTasks.length === 0 && pinnedTasks.length === 0 ? (
+            {listTasks.length === 0 && pinnedVisibleTasks.length === 0 ? (
               <li className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">
                 {title === "Today"
                   ? "No tasks for today"
@@ -1122,7 +1276,10 @@ export function TaskListPanel({
                         : "No tasks"}
               </li>
             ) : (
-              renderTaskItems(listTasks, "unpinned")
+              renderTaskItems(
+                canReorder ? unpinnedVisibleTasks : listTasks,
+                "unpinned",
+              )
             )}
           </ul>
         </div>

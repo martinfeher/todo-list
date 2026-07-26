@@ -43,6 +43,7 @@ export type Task = {
   dueTimeZone: string;
   priority: number | null;
   pinned: boolean;
+  parentId: string | null;
   tags: TaskTag[];
 };
 
@@ -80,6 +81,7 @@ function withPinnedDefaults(tasksByList: Record<string, Task[]>) {
       tasks.map((task) => ({
         ...task,
         pinned: Boolean(task.pinned),
+        parentId: task.parentId ?? null,
         tags: task.tags ?? [],
       })),
     ]),
@@ -519,6 +521,7 @@ export function TodoApp({
       dueTimeZone: "floating",
       priority: null,
       pinned: false,
+      parentId: null,
       tags: [],
     };
 
@@ -803,10 +806,19 @@ export function TodoApp({
     await moveTaskToListInDb(taskId, targetListId);
 
     setTasksByList((current) => {
-      const nextSource = (current[sourceListId] ?? []).filter(
-        (item) => item.id !== taskId,
-      );
-      const nextTarget = [task, ...(current[targetListId] ?? [])];
+      const sourceList = current[sourceListId] ?? [];
+      const childIds = sourceList
+        .filter((item) => item.parentId === taskId)
+        .map((item) => item.id);
+      const movingIds = new Set([taskId, ...childIds]);
+      const nextSource = sourceList.filter((item) => !movingIds.has(item.id));
+      const movedTasks = sourceList
+        .filter((item) => movingIds.has(item.id))
+        .map((item) => ({
+          ...item,
+          ...(item.id === taskId && item.parentId ? { parentId: null } : {}),
+        }));
+      const nextTarget = [...movedTasks, ...(current[targetListId] ?? [])];
 
       return {
         ...current,
@@ -820,6 +832,7 @@ export function TodoApp({
     listId: string,
     activeTaskIds: string[],
     section: "pinned" | "unpinned",
+    parentUpdates: Array<{ taskId: string; parentId: string | null }> = [],
   ) {
     let mergedTaskIds: string[] | null = null;
 
@@ -835,10 +848,22 @@ export function TodoApp({
         return current;
       }
 
-      const mergedTasks =
+      let mergedTasks =
         section === "pinned"
           ? mergeReorderedPinnedTasks(currentTasks, activeTaskIds)
           : mergeReorderedUnpinnedTasks(currentTasks, activeTaskIds);
+
+      if (parentUpdates.length > 0) {
+        const parentByTaskId = new Map(
+          parentUpdates.map((update) => [update.taskId, update.parentId]),
+        );
+        mergedTasks = mergedTasks.map((task) =>
+          parentByTaskId.has(task.id)
+            ? { ...task, parentId: parentByTaskId.get(task.id)! }
+            : task,
+        );
+      }
+
       mergedTaskIds = mergedTasks.map((task) => task.id);
 
       return {
@@ -849,7 +874,7 @@ export function TodoApp({
 
     if (!mergedTaskIds) return;
 
-    await reorderTasksInDb(listId, mergedTaskIds);
+    await reorderTasksInDb(listId, mergedTaskIds, parentUpdates);
   }
 
   const showDetailsPanel = selectedTaskId !== null;
@@ -875,7 +900,7 @@ export function TodoApp({
 
   return (
     <>
-      <div className="flex min-h-full flex-1">
+      <div className="flex h-dvh min-h-0 flex-1 overflow-hidden">
         <Sidebar
           lists={lists}
           labelTags={labelTags}

@@ -345,7 +345,7 @@ export function Sidebar({
           ))}
           
           <hr className="my-2 border-zinc-200 dark:border-zinc-800" />
-          <div className="flex flex-col gap-2 px-4 pb-1 text-xs font-medium text-zinc-400 dark:text-zinc-500">Zoznam listov</div>
+          <div className="flex flex-col gap-2 px-4 pb-1 text-xs font-medium text-zinc-400 dark:text-zinc-500">Lists</div>
           <div ref={listContainerRef} className="relative flex flex-col">
             {dropIndicatorTop !== null && (
               <div
@@ -439,7 +439,7 @@ export function Sidebar({
           {labelTags.length > 0 ? (
             <div className="mt-3 flex flex-col">
               <p className="px-4 pb-1 text-xs font-medium text-zinc-400 dark:text-zinc-500">
-                Tags
+                Labels
               </p>
               {labelTags.map((tag) => (
                 <button

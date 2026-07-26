@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BiChevronLeft, BiChevronRight } from "react-icons/bi";
+import { CalendarTaskPopover } from "./calendar-task-popover";
 import { TaskListPanel } from "./task-list-panel";
 import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
@@ -33,6 +34,22 @@ type CalendarPanelProps = {
 };
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const CALENDAR_TASK_DRAG_THRESHOLD_PX = 5;
+
+type CalendarTaskDragState = {
+  taskId: string;
+  sourceDateKey: string;
+  pointerId: number;
+  captureTarget: HTMLElement;
+};
+
+function resolveCalendarDayFromPoint(clientX: number, clientY: number) {
+  const element = document.elementFromPoint(clientX, clientY);
+  if (!(element instanceof Element)) return null;
+
+  const dayCell = element.closest("[data-calendar-day]");
+  return dayCell?.getAttribute("data-calendar-day") ?? null;
+}
 
 function startOfDay(date: Date) {
   const next = new Date(date);
@@ -96,7 +113,7 @@ function CalendarTabs({
   onChange: (tab: CalendarTab) => void;
 }) {
   return (
-    <div className="flex gap-1 border-b border-zinc-200 px-4 dark:border-zinc-800">
+    <div className="flex shrink-0 gap-1 border-b border-zinc-200 px-4 dark:border-zinc-800">
       {(["list", "calendar"] as const).map((tab) => (
         <button
           key={tab}
@@ -120,15 +137,29 @@ function CalendarMonthView({
   selectedTaskId,
   onSelectTask,
   onToggleTask,
+  onSetTaskDueDate,
+  onSetTaskDueTime,
 }: {
   tasks: TaskListItem[];
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
   onToggleTask: (taskId: string) => void;
+  onSetTaskDueDate?: (taskId: string, dateValue: string | null) => void;
+  onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
 }) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [monthDate, setMonthDate] = useState(() => startOfDay(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
+  const [taskPopover, setTaskPopover] = useState<{
+    task: TaskListItem;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [dropTargetDateKey, setDropTargetDateKey] = useState<string | null>(
+    null,
+  );
+  const dragStateRef = useRef<CalendarTaskDragState | null>(null);
+  const suppressTaskClickRef = useRef(false);
 
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskListItem[]>();
@@ -152,9 +183,14 @@ function CalendarMonthView({
     () => getFullMonthDays(monthDate.getFullYear(), monthDate.getMonth()),
     [monthDate],
   );
+  const monthRowCount = Math.ceil(monthDays.length / 7);
 
   const selectedDateKey = toDateKey(selectedDate);
   const selectedDayTasks = tasksByDate.get(selectedDateKey) ?? [];
+  const popoverTask = useMemo(() => {
+    if (!taskPopover) return null;
+    return tasks.find((item) => item.id === taskPopover.task.id) ?? taskPopover.task;
+  }, [taskPopover, tasks]);
 
   function goToPreviousMonth() {
     setMonthDate(
@@ -168,11 +204,139 @@ function CalendarMonthView({
     );
   }
 
+  function handleCalendarTaskClick(
+    event: React.MouseEvent<HTMLButtonElement>,
+    task: TaskListItem,
+    day: Date,
+  ) {
+    event.stopPropagation();
+
+    if (suppressTaskClickRef.current) {
+      suppressTaskClickRef.current = false;
+      return;
+    }
+
+    setSelectedDate(day);
+    onSelectTask(task.id);
+    setTaskPopover({
+      task,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }
+
+  function handleCalendarTaskPointerDown(
+    event: React.PointerEvent<HTMLButtonElement>,
+    task: TaskListItem,
+    day: Date,
+  ) {
+    if (event.button !== 0 || !onSetTaskDueDate) return;
+
+    const sourceDateKey = toDateKey(day);
+    const taskButton = event.currentTarget;
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let dragStarted = false;
+
+    function clearPendingListeners() {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("pointercancel", onPointerUp);
+    }
+
+    function finishDrag(upEvent: PointerEvent) {
+      document.body.style.cursor = "";
+      taskButton.classList.remove("opacity-50");
+
+      if (taskButton.hasPointerCapture(pointerId)) {
+        taskButton.releasePointerCapture(pointerId);
+      }
+
+      const dragState = dragStateRef.current;
+      const targetDateKey = resolveCalendarDayFromPoint(
+        upEvent.clientX,
+        upEvent.clientY,
+      );
+
+      if (
+        dragState &&
+        onSetTaskDueDate &&
+        targetDateKey &&
+        targetDateKey !== dragState.sourceDateKey
+      ) {
+        onSetTaskDueDate(dragState.taskId, targetDateKey);
+        const targetDate = fromDateKey(targetDateKey);
+        if (targetDate) {
+          setSelectedDate(targetDate);
+        }
+      }
+
+      dragStateRef.current = null;
+      setDropTargetDateKey(null);
+      suppressTaskClickRef.current = true;
+    }
+
+    function onPointerMove(moveEvent: PointerEvent) {
+      if (moveEvent.pointerId !== pointerId) return;
+
+      if (!dragStarted) {
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+        if (Math.hypot(dx, dy) < CALENDAR_TASK_DRAG_THRESHOLD_PX) return;
+
+        dragStarted = true;
+        clearPendingListeners();
+        setTaskPopover(null);
+        dragStateRef.current = {
+          taskId: task.id,
+          sourceDateKey,
+          pointerId,
+          captureTarget: taskButton,
+        };
+        taskButton.setPointerCapture(pointerId);
+        taskButton.classList.add("opacity-50");
+        document.body.style.cursor = "grabbing";
+        document.addEventListener("pointermove", onActivePointerMove);
+        document.addEventListener("pointerup", onActivePointerUp);
+        document.addEventListener("pointercancel", onActivePointerUp);
+      }
+    }
+
+    function onActivePointerMove(moveEvent: PointerEvent) {
+      if (moveEvent.pointerId !== pointerId) return;
+      setDropTargetDateKey(
+        resolveCalendarDayFromPoint(moveEvent.clientX, moveEvent.clientY),
+      );
+    }
+
+    function onActivePointerUp(upEvent: PointerEvent) {
+      if (upEvent.pointerId !== pointerId) return;
+      document.removeEventListener("pointermove", onActivePointerMove);
+      document.removeEventListener("pointerup", onActivePointerUp);
+      document.removeEventListener("pointercancel", onActivePointerUp);
+      finishDrag(upEvent);
+    }
+
+    function onPointerUp(upEvent: PointerEvent) {
+      if (upEvent.pointerId !== pointerId) return;
+      clearPendingListeners();
+    }
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerUp);
+  }
+
+  useEffect(() => {
+    setTaskPopover(null);
+  }, [monthDate]);
+
   return (
     <div className="flex min-h-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col overflow-auto p-4">
-        <div className="mx-auto w-full max-w-4xl">
-          <div className="mb-4 flex items-center justify-between">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
+        <div className="mx-auto flex h-full w-full max-w-6xl min-h-0 flex-col">
+          <div className="mb-4 flex shrink-0 items-center justify-between">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               {formatMonthYear(monthDate)}
             </h2>
@@ -196,7 +360,7 @@ function CalendarMonthView({
             </div>
           </div>
 
-          <div className="grid grid-cols-7 border-b border-zinc-200 pb-2 dark:border-zinc-800">
+          <div className="grid shrink-0 grid-cols-7 border-b border-zinc-200 pb-2 dark:border-zinc-800">
             {WEEKDAY_LABELS.map((label) => (
               <div
                 key={label}
@@ -207,13 +371,19 @@ function CalendarMonthView({
             ))}
           </div>
 
-          <div className="grid grid-cols-7 border-l border-t border-zinc-200 dark:border-zinc-800">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div
+              className="grid h-full min-h-full grid-cols-7 border-l border-t border-zinc-200 dark:border-zinc-800"
+              style={{
+                gridTemplateRows: `repeat(${monthRowCount}, minmax(96px, 140px))`,
+              }}
+            >
             {monthDays.map((day, index) => {
               if (!day) {
                 return (
                   <div
                     key={`empty-${index}`}
-                    className="min-h-[96px] border-r border-b border-zinc-200 bg-zinc-50/50 dark:border-zinc-800 dark:bg-zinc-900/40"
+                    className="h-full border-r border-b border-zinc-200 bg-zinc-50/50 dark:border-zinc-800 dark:bg-zinc-900/40"
                   />
                 );
               }
@@ -224,15 +394,27 @@ function CalendarMonthView({
               const isToday = isSameDay(day, today);
               const isCurrentMonth = day.getMonth() === monthDate.getMonth();
 
+              const isDropTarget = dropTargetDateKey === dateKey;
+
               return (
-                <button
+                <div
                   key={dateKey}
-                  type="button"
+                  data-calendar-day={dateKey}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedDate(day)}
-                  className={`min-h-[96px] border-r border-b border-zinc-200 p-2 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/60 ${
-                    isSelected
-                      ? "bg-zinc-100 ring-1 ring-inset ring-zinc-300 dark:bg-zinc-900 dark:ring-zinc-600"
-                      : "bg-white dark:bg-zinc-950"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedDate(day);
+                    }
+                  }}
+                  className={`h-full cursor-pointer border-r border-b border-zinc-200 p-2 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/60 ${
+                    isDropTarget
+                      ? "bg-blue-50 ring-2 ring-inset ring-blue-400 dark:bg-blue-950/30 dark:ring-blue-500"
+                      : isSelected
+                        ? "bg-zinc-100 ring-1 ring-inset ring-zinc-300 dark:bg-zinc-900 dark:ring-zinc-600"
+                        : "bg-white dark:bg-zinc-950"
                   }`}
                 >
                   <span
@@ -249,16 +431,27 @@ function CalendarMonthView({
 
                   <div className="mt-1 space-y-0.5">
                     {dayTasks.slice(0, 3).map((task) => (
-                      <span
+                      <button
                         key={task.id}
-                        className={`block truncate rounded px-1 py-0.5 text-[11px] ${
+                        type="button"
+                        onClick={(event) =>
+                          handleCalendarTaskClick(event, task, day)
+                        }
+                        onPointerDown={(event) =>
+                          handleCalendarTaskPointerDown(event, task, day)
+                        }
+                        className={`block w-full truncate rounded px-1 py-0.5 text-left text-[11px] transition-colors touch-none ${
+                          onSetTaskDueDate
+                            ? "cursor-grab active:cursor-grabbing"
+                            : ""
+                        } ${
                           task.id === selectedTaskId
                             ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
-                            : "bg-zinc-200/80 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+                            : "bg-zinc-200/80 text-zinc-700 hover:bg-zinc-300/80 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
                         }`}
                       >
                         {task.name}
-                      </span>
+                      </button>
                     ))}
                     {dayTasks.length > 3 && (
                       <span className="block px-1 text-[11px] text-zinc-400">
@@ -266,9 +459,10 @@ function CalendarMonthView({
                       </span>
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
+            </div>
           </div>
         </div>
       </div>
@@ -320,6 +514,17 @@ function CalendarMonthView({
             )}
         </ul>
       </aside>
+
+      {popoverTask && taskPopover ? (
+        <CalendarTaskPopover
+          task={popoverTask}
+          x={taskPopover.x}
+          y={taskPopover.y}
+          onClose={() => setTaskPopover(null)}
+          onSetTaskDueDate={onSetTaskDueDate}
+          onSetTaskDueTime={onSetTaskDueTime}
+        />
+      ) : null}
     </div>
   );
 }
@@ -342,11 +547,12 @@ export function CalendarPanel({
   const [activeTab, setActiveTab] = useState<CalendarTab>("calendar");
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col bg-white dark:bg-zinc-950">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white dark:bg-zinc-950">
       <CalendarTabs activeTab={activeTab} onChange={setActiveTab} />
 
       {activeTab === "list" ? (
-        <TaskListPanel
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <TaskListPanel
           title="Calendar"
           tasks={tasks}
           lists={lists}
@@ -366,12 +572,15 @@ export function CalendarPanel({
           onLabelTagsChanged={onLabelTagsChanged}
           onMoveTaskToList={onMoveTaskToList}
         />
+        </div>
       ) : (
         <CalendarMonthView
           tasks={tasks}
           selectedTaskId={selectedTaskId}
           onSelectTask={onSelectTask}
           onToggleTask={onToggleTask}
+          onSetTaskDueDate={onSetTaskDueDate}
+          onSetTaskDueTime={onSetTaskDueTime}
         />
       )}
     </section>

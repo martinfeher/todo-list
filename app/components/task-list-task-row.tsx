@@ -14,9 +14,11 @@ import { TaskTagPills } from "./task-tag-pills";
 import { ThreeDotsIcon } from "./three-dots-icon";
 import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
+import { SUBTASK_INDENT_PX, SUBTASK_ICON_INDENT_PX } from "@/lib/task-subtasks";
 
 type TaskListTaskRowProps = {
   task: TaskListItem;
+  depth?: number;
   isCompleting?: boolean;
   selectedTaskId: string | null;
   editingTaskId: string | null;
@@ -96,6 +98,7 @@ function getRowMenuView(
 
 export function TaskListTaskRow({
   task,
+  depth = 0,
   isCompleting = false,
   selectedTaskId,
   editingTaskId,
@@ -160,12 +163,15 @@ export function TaskListTaskRow({
     !isCompleting &&
     (openDatePickerTaskId === task.id || rowMenuView !== null);
 
+  const rowPaddingLeft = 8 + (depth * SUBTASK_INDENT_PX);
+
   if (isCompleting) {
     return (
       <li
         data-task-id={task.id}
         aria-label={`${task.name} completed`}
-        className="flex min-h-[35px] items-center gap-2 border-b border-zinc-100 px-2 py-1 dark:border-zinc-900"
+        className="flex min-h-[35px] items-center gap-2 border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900"
+        style={{ paddingLeft: rowPaddingLeft }}
       >
         {showDragHandle ? <span className="size-[19px] shrink-0" aria-hidden /> : null}
         <span className="size-4 shrink-0" aria-hidden />
@@ -185,11 +191,12 @@ export function TaskListTaskRow({
           ? (event) => onTaskDragStart(event, task.id)
           : undefined
       }
-      className={`group flex min-h-[35px] items-center gap-2 border-b border-zinc-100 px-2 py-1 dark:border-zinc-900 ${
+      className={`group flex min-h-[35px] items-center gap-2 border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 ${
         showDragHandle
           ? "cursor-grab touch-none active:cursor-grabbing"
           : "cursor-pointer"
       }`}
+      style={{ paddingLeft: rowPaddingLeft }}
     >
       {showDragHandle ? (
         <span
