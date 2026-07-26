@@ -12,6 +12,7 @@ import {
 import { BiSearch } from "react-icons/bi";
 import { fetchTaskById } from "@/lib/task-details-api";
 import { taskDetailsHasContent } from "@/lib/task-details-content";
+import { TaskCompletionCheckbox } from "./task-completion-checkbox";
 import type { SearchTask } from "./todo-app";
 
 type SearchModalProps = {
@@ -343,7 +344,8 @@ export function SearchModal({
       ? "Start typing to search task names"
       : searchScope === "content"
         ? "Start typing to search task content"
-        : "Start typing to search task names and notes";
+        : "Start typing to search task names and content";
+   
 
   return (
     <div
@@ -435,12 +437,12 @@ export function SearchModal({
                         : ""
                     }`}
                   >
-                    <input
-                      type="checkbox"
+                    <TaskCompletionCheckbox
                       checked={task.completed}
                       onChange={() => onToggleTask(task.id)}
                       onClick={(event) => event.stopPropagation()}
-                      className="my-auto size-4 shrink-0 accent-zinc-900 dark:accent-zinc-50"
+                      className="my-auto"
+                      aria-label={`Mark ${task.name} complete`}
                     />
                     <button
                       type="button"

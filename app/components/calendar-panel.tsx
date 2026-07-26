@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BiChevronLeft, BiChevronRight } from "react-icons/bi";
 import { CalendarTaskPopover } from "./calendar-task-popover";
+import { TaskCompletionCheckbox } from "./task-completion-checkbox";
 import { TaskListPanel } from "./task-list-panel";
 import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
@@ -489,11 +490,11 @@ export function CalendarMonthView({
                       : ""
                   }`}
                 >
-                  <input
-                    type="checkbox"
+                  <TaskCompletionCheckbox
                     checked={task.completed}
                     onChange={() => onToggleTask(task.id)}
-                    className="size-4 shrink-0 accent-zinc-900 dark:accent-zinc-50"
+                    aria-label={`Mark ${task.name} complete`}
+                    className="text-[#777777]"
                   />
                   <button
                     type="button"

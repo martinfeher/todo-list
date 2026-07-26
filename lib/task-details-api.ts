@@ -39,3 +39,12 @@ export async function saveTaskDetails(
     throw new Error("Failed to save task details");
   }
 }
+
+export function saveTaskDetailsKeepalive(taskId: string, details: string) {
+  void fetch(`/api/tasks/${taskId}/details`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ details }),
+    keepalive: true,
+  });
+}

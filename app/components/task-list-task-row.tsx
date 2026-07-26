@@ -4,6 +4,7 @@ import type { RefObject } from "react";
 import { BiCalendar } from "react-icons/bi";
 import { InteractIcon } from "./line-control-icons";
 import { TaskCompletedIndicator } from "./task-completed-indicator";
+import { TaskCompletionCheckbox } from "./task-completion-checkbox";
 import { TaskDatePicker } from "./task-date-picker";
 import {
   TaskRowContextMenu,
@@ -178,7 +179,6 @@ export function TaskListTaskRow({
         style={{ paddingLeft: rowPaddingLeft }}
       >
         {showDragHandle ? <span className="size-[19px] shrink-0" aria-hidden /> : null}
-        <span className="size-4 shrink-0" aria-hidden />
         <TaskCompletedIndicator />
       </li>
     );
@@ -215,12 +215,11 @@ export function TaskListTaskRow({
         </span>
       ) : null}
 
-      <input
-        type="checkbox"
+      <TaskCompletionCheckbox
         checked={task.completed}
         onChange={() => onToggleTask(task.id)}
         onClick={(event) => event.stopPropagation()}
-        className="size-4 shrink-0 accent-zinc-900 dark:accent-zinc-50"
+        aria-label={`Mark ${task.name} complete`}
       />
 
       {editingTaskId === task.id ? (

@@ -113,6 +113,27 @@ export function extractReferencedImageFilenames(
   return filenames;
 }
 
+export function referencedTaskImagesChanged(
+  taskId: string,
+  previousHtml: string,
+  nextHtml: string,
+) {
+  const previous = extractReferencedImageFilenames(taskId, previousHtml);
+  const next = extractReferencedImageFilenames(taskId, nextHtml);
+
+  if (previous.size !== next.size) {
+    return true;
+  }
+
+  for (const filename of previous) {
+    if (!next.has(filename)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function cleanupOrphanedTaskImages(
   taskId: string,
   detailsHtml: string,

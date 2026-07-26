@@ -18,6 +18,7 @@ import {
 import {
   cleanupOrphanedTaskImages,
   deleteTaskImageDirectory,
+  referencedTaskImagesChanged,
 } from "@/lib/task-image-storage";
 
 export async function getTaskById(taskId: string) {
@@ -37,12 +38,27 @@ export async function getTaskById(taskId: string) {
 }
 
 export async function updateTaskDetails(taskId: string, details: string) {
+  const existing = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { details: true },
+  });
+
+  if (!existing) {
+    throw new Error("Task not found");
+  }
+
+  if (existing.details === details) {
+    return;
+  }
+
   await prisma.task.update({
     where: { id: taskId },
     data: { details },
   });
 
-  await cleanupOrphanedTaskImages(taskId, details);
+  if (referencedTaskImagesChanged(taskId, existing.details, details)) {
+    await cleanupOrphanedTaskImages(taskId, details);
+  }
 }
 
 export async function updateTaskDueDate(taskId: string, dueDate: string | null) {

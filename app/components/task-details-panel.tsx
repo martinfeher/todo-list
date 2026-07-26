@@ -12,7 +12,7 @@ import {
   LuPilcrow,
 } from "react-icons/lu";
 import { renameTask, updateTaskDueDate, updateTaskDueTime } from "@/app/actions/todo";
-import { fetchTaskById, saveTaskDetails } from "@/lib/task-details-api";
+import { fetchTaskById, saveTaskDetails, saveTaskDetailsKeepalive } from "@/lib/task-details-api";
 import { taskDetailsHasContent } from "@/lib/task-details-content";
 import {
   formatDueTimeLabel,
@@ -183,8 +183,10 @@ const ADD_BLOCK_OPTIONS: {
   { type: "code", label: "Code", Icon: LuCode },
 ];
 
-const AUTO_SAVE_DELAY_MS = 4000;
-const LARGE_CONTENT_AUTO_SAVE_DELAY_MS = 8000;
+const AUTO_SAVE_DEBOUNCE_MS = 3000;
+const LARGE_CONTENT_AUTO_SAVE_DEBOUNCE_MS = 5000;
+const MIN_SAVE_INTERVAL_MS = 3000;
+const CLIPBOARD_SAVE_NOTICE_MS = 4000;
 const HISTORY_DEBOUNCE_MS = 400;
 const LARGE_CONTENT_HISTORY_DEBOUNCE_MS = 1200;
 const HISTORY_LIMIT = 50;
@@ -221,6 +223,13 @@ function formatDueDateLabel(value: string | null) {
     month: "short",
     day: "numeric",
     year: "numeric",
+  }).format(date);
+}
+
+function formatSaveTime(date: Date) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
   }).format(date);
 }
 
@@ -358,6 +367,8 @@ export function TaskDetailsPanel({
 }: TaskDetailsPanelProps) {
   const [task, setTask] = useState<TaskDetails | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [showClipboardNotice, setShowClipboardNotice] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [formatMenu, setFormatMenu] = useState<FormatMenuState | null>(null);
   const [lineControls, setLineControls] = useState<LineControlItem[]>([]);
   const [dropIndicator, setDropIndicator] = useState<DropIndicatorState | null>(null);
@@ -411,6 +422,7 @@ export function TaskDetailsPanel({
   const saveTimerRef = useRef<number | null>(null);
   const saveInFlightRef = useRef(false);
   const saveQueuedRef = useRef(false);
+  const lastSaveCompletedAtRef = useRef(0);
   const historyTimerRef = useRef<number | null>(null);
   const historyRef = useRef<string[]>([]);
   const historyIndexRef = useRef(-1);
@@ -424,9 +436,24 @@ export function TaskDetailsPanel({
   const formatMenuTimerRef = useRef<number | null>(null);
   const lineControlsTimerRef = useRef<number | null>(null);
   const titleSyncTimerRef = useRef<number | null>(null);
+  const clipboardNoticeTimerRef = useRef<number | null>(null);
 
   const readEditorContent = useCallback(() => {
     return normalizeDetails(editorRef.current?.innerHTML ?? "");
+  }, []);
+
+  const readCurrentSplitContent = useCallback(() => {
+    const editorHtml = readEditorContent();
+    detailsRef.current = editorHtml;
+    return splitEditorContent(editorHtml);
+  }, [readEditorContent]);
+
+  const waitForSaveIdle = useCallback(async () => {
+    while (saveInFlightRef.current) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 10);
+      });
+    }
   }, []);
 
   const syncEditorContent = useCallback(() => {
@@ -498,6 +525,18 @@ export function TaskDetailsPanel({
     if (saveStatusRef.current === "pending") return;
     saveStatusRef.current = "pending";
     setSaveStatus("pending");
+  }, []);
+
+  const showClipboardSaveNotice = useCallback(() => {
+    if (clipboardNoticeTimerRef.current !== null) {
+      window.clearTimeout(clipboardNoticeTimerRef.current);
+    }
+
+    setShowClipboardNotice(true);
+    clipboardNoticeTimerRef.current = window.setTimeout(() => {
+      clipboardNoticeTimerRef.current = null;
+      setShowClipboardNotice(false);
+    }, CLIPBOARD_SAVE_NOTICE_MS);
   }, []);
 
   const updateHistoryAvailability = useCallback(() => {
@@ -586,9 +625,7 @@ export function TaskDetailsPanel({
         const currentTaskId = taskIdRef.current;
         if (!currentTaskId || !isReadyRef.current) break;
 
-        const editorHtml = editorRef.current?.innerHTML ?? detailsRef.current;
-        const { title, details } = splitEditorContent(editorHtml);
-        detailsRef.current = editorHtml;
+        const { title, details } = readCurrentSplitContent();
 
         const detailsChanged = details !== savedDetailsRef.current;
         const titleChanged = Boolean(title && title !== taskNameRef.current);
@@ -601,26 +638,32 @@ export function TaskDetailsPanel({
         let nextStatus: SaveStatus | null = null;
 
         if (detailsChanged) {
-          const detailsBytes = new TextEncoder().encode(details).byteLength;
-          if (detailsBytes > MAX_DETAILS_SAVE_BYTES) {
-            saveStatusRef.current = "error";
-            setSaveStatus("error");
-            break;
+          const detailsToSave = readCurrentSplitContent().details;
+
+          if (detailsToSave !== savedDetailsRef.current) {
+            const detailsBytes = new TextEncoder().encode(detailsToSave).byteLength;
+            if (detailsBytes > MAX_DETAILS_SAVE_BYTES) {
+              saveStatusRef.current = "error";
+              setSaveStatus("error");
+              break;
+            }
+
+            await saveTaskDetails(currentTaskId, detailsToSave);
+
+            if (taskIdRef.current !== currentTaskId) break;
+
+            savedDetailsRef.current = detailsToSave;
+            onDetailsSaved(currentTaskId, detailsToSave);
+            nextStatus = "saved";
           }
-
-          await saveTaskDetails(currentTaskId, details);
-
-          if (taskIdRef.current !== currentTaskId) break;
-
-          savedDetailsRef.current = details;
-          onDetailsSaved(currentTaskId, details);
-          nextStatus = "saved";
         }
 
-        if (title && title !== taskNameRef.current) {
+        const titleToSave = readCurrentSplitContent().title;
+
+        if (titleToSave && titleToSave !== taskNameRef.current) {
           if (taskIdRef.current !== currentTaskId) break;
 
-          const updatedTask = await renameTask(currentTaskId, title);
+          const updatedTask = await renameTask(currentTaskId, titleToSave);
 
           if (taskIdRef.current !== currentTaskId) break;
 
@@ -636,10 +679,11 @@ export function TaskDetailsPanel({
         if (nextStatus) {
           saveStatusRef.current = nextStatus;
           setSaveStatus(nextStatus);
+          lastSaveCompletedAtRef.current = Date.now();
+          setLastSavedAt(new Date());
         }
 
-        const latestHtml = editorRef.current?.innerHTML ?? detailsRef.current;
-        const latest = splitEditorContent(latestHtml);
+        const latest = readCurrentSplitContent();
         const stillDirty =
           latest.details !== savedDetailsRef.current ||
           (Boolean(latest.title) && latest.title !== taskNameRef.current);
@@ -657,24 +701,75 @@ export function TaskDetailsPanel({
         void saveDetails();
       }
     }
-  }, [onDetailsSaved, onTaskRenamed]);
+  }, [onDetailsSaved, onTaskRenamed, readCurrentSplitContent]);
+
+  const runPendingAutoSave = useCallback(() => {
+    const sinceLastSave = Date.now() - lastSaveCompletedAtRef.current;
+    const minGapRemaining = MIN_SAVE_INTERVAL_MS - sinceLastSave;
+
+    if (minGapRemaining > 0) {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+
+      saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null;
+        void saveDetails();
+      }, minGapRemaining);
+      return;
+    }
+
+    saveTimerRef.current = null;
+    void saveDetails();
+  }, [saveDetails]);
 
   const scheduleAutoSave = useCallback(() => {
+    markSavePending();
+
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
     }
 
-    markSavePending();
-
-    const delay = isLargeContentRef.current
-      ? LARGE_CONTENT_AUTO_SAVE_DELAY_MS
-      : AUTO_SAVE_DELAY_MS;
+    const debounceMs = isLargeContentRef.current
+      ? LARGE_CONTENT_AUTO_SAVE_DEBOUNCE_MS
+      : AUTO_SAVE_DEBOUNCE_MS;
 
     saveTimerRef.current = window.setTimeout(() => {
+      runPendingAutoSave();
+    }, debounceMs);
+  }, [markSavePending, runPendingAutoSave]);
+
+  const flushAutoSave = useCallback(() => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
-      void saveDetails();
-    }, delay);
-  }, [markSavePending, saveDetails]);
+    }
+
+    runPendingAutoSave();
+  }, [runPendingAutoSave]);
+
+  const requestSave = useCallback(
+    (mode: "debounced" | "flush" | "immediate" = "debounced") => {
+      if (mode === "immediate") {
+        if (saveTimerRef.current !== null) {
+          window.clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = null;
+        }
+
+        markSavePending();
+        void saveDetails();
+        return;
+      }
+
+      if (mode === "flush") {
+        flushAutoSave();
+        return;
+      }
+
+      scheduleAutoSave();
+    },
+    [flushAutoSave, markSavePending, saveDetails, scheduleAutoSave],
+  );
 
   const updateLineControls = useCallback(() => {
     const editor = editorRef.current;
@@ -1242,6 +1337,13 @@ export function TaskDetailsPanel({
   ]);
 
   useEffect(() => {
+    if (clipboardNoticeTimerRef.current !== null) {
+      window.clearTimeout(clipboardNoticeTimerRef.current);
+      clipboardNoticeTimerRef.current = null;
+    }
+    setShowClipboardNotice(false);
+    setLastSavedAt(null);
+
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
@@ -1260,6 +1362,12 @@ export function TaskDetailsPanel({
       taskIdRef.current = null;
       saveStatusRef.current = "idle";
       setSaveStatus("idle");
+      if (clipboardNoticeTimerRef.current !== null) {
+        window.clearTimeout(clipboardNoticeTimerRef.current);
+        clipboardNoticeTimerRef.current = null;
+      }
+      setShowClipboardNotice(false);
+      setLastSavedAt(null);
       closeFormatMenu();
       setLineControls([]);
       setAddBlockMenu(null);
@@ -1344,24 +1452,65 @@ export function TaskDetailsPanel({
       }
 
       const previousTaskId = taskIdRef.current;
-      const editorHtml = editorRef.current?.innerHTML ?? detailsRef.current;
-      const { title, details } = splitEditorContent(editorHtml);
+      const editorHtmlAtSwitch =
+        editorRef.current?.innerHTML ?? detailsRef.current;
+      const { title: titleAtSwitch, details: detailsAtSwitch } =
+        splitEditorContent(editorHtmlAtSwitch);
+      const savedDetailsAtSwitch = savedDetailsRef.current;
+      const taskNameAtSwitch = taskNameRef.current;
 
-      if (previousTaskId && details !== savedDetailsRef.current) {
-        void saveTaskDetails(previousTaskId, details);
-      }
+      void (async () => {
+        await waitForSaveIdle();
 
-      if (
-        previousTaskId &&
-        title &&
-        title !== taskNameRef.current
-      ) {
-        void renameTask(previousTaskId, title).then(() => {
-          onTaskRenamed(previousTaskId, title);
-        });
-      }
+        if (!previousTaskId) return;
+
+        if (detailsAtSwitch !== savedDetailsAtSwitch) {
+          try {
+            await saveTaskDetails(previousTaskId, detailsAtSwitch);
+            savedDetailsRef.current = detailsAtSwitch;
+            onDetailsSaved(previousTaskId, detailsAtSwitch);
+          } catch {
+            saveTaskDetailsKeepalive(previousTaskId, detailsAtSwitch);
+          }
+        }
+
+        if (titleAtSwitch && titleAtSwitch !== taskNameAtSwitch) {
+          try {
+            const updatedTask = await renameTask(previousTaskId, titleAtSwitch);
+            onTaskRenamed(previousTaskId, updatedTask.name);
+          } catch {
+            // Best effort only when switching tasks.
+          }
+        }
+      })();
     };
-  }, [closeFormatMenu, onTaskHasDetailsKnown, onTaskRenamed, taskId]);
+  }, [
+    closeFormatMenu,
+    onDetailsSaved,
+    onTaskHasDetailsKnown,
+    onTaskRenamed,
+    taskId,
+    waitForSaveIdle,
+  ]);
+
+  useEffect(() => {
+    function handlePageHide() {
+      const currentTaskId = taskIdRef.current;
+      if (!currentTaskId || !isReadyRef.current) return;
+
+      const editorHtml = editorRef.current?.innerHTML ?? detailsRef.current;
+      const { details } = splitEditorContent(editorHtml);
+
+      if (details === savedDetailsRef.current) return;
+
+      saveTaskDetailsKeepalive(currentTaskId, details);
+    }
+
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -1391,6 +1540,10 @@ export function TaskDetailsPanel({
 
       if (formatMenuTimerRef.current !== null) {
         window.clearTimeout(formatMenuTimerRef.current);
+      }
+
+      if (clipboardNoticeTimerRef.current !== null) {
+        window.clearTimeout(clipboardNoticeTimerRef.current);
       }
 
       document.removeEventListener("pointermove", handleDragMove);
@@ -1434,7 +1587,7 @@ export function TaskDetailsPanel({
 
       if (!panelRef.current?.contains(target)) {
         closeFormatMenu();
-        void saveDetails();
+        flushAutoSave();
       }
     }
 
@@ -1460,7 +1613,7 @@ export function TaskDetailsPanel({
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("selectionchange", handleSelectionChange);
     };
-  }, [closeFormatMenu, saveDetails, scheduleLineControlsUpdate, updateFormatMenu]);
+  }, [closeFormatMenu, flushAutoSave, scheduleLineControlsUpdate, updateFormatMenu]);
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
@@ -1502,6 +1655,7 @@ export function TaskDetailsPanel({
   async function insertImagesFromFiles(
     files: File[],
     referenceLine?: HTMLElement | null,
+    options?: { fromClipboard?: boolean },
   ) {
     const editor = editorRef.current;
     const currentTaskId = taskIdRef.current;
@@ -1514,6 +1668,8 @@ export function TaskDetailsPanel({
     }
 
     try {
+      await waitForSaveIdle();
+
       const sources = await uploadImageFiles(currentTaskId, files);
 
       if (taskIdRef.current !== currentTaskId || !editorRef.current) return;
@@ -1521,8 +1677,10 @@ export function TaskDetailsPanel({
       await insertImagesIntoEditor(editor, sources, referenceLine);
       syncEditorContent();
       recordHistorySnapshot();
-      scheduleAutoSave();
-      void saveDetails();
+      if (options?.fromClipboard) {
+        showClipboardSaveNotice();
+      }
+      requestSave("immediate");
       updateLineControls();
     } catch {
       setSaveStatus("error");
@@ -1551,7 +1709,7 @@ export function TaskDetailsPanel({
     const files = getImageFilesFromDataTransfer(event.clipboardData);
     if (files.length > 0) {
       event.preventDefault();
-      void insertImagesFromFiles(files, activeLine);
+      void insertImagesFromFiles(files, activeLine, { fromClipboard: true });
       return;
     }
 
@@ -1644,7 +1802,7 @@ export function TaskDetailsPanel({
 
     runEditorNormalization("full");
     flushHistorySnapshot();
-    void saveDetails();
+    flushAutoSave();
   }
 
   function handleEditorWrapperMouseMove(
@@ -1855,7 +2013,6 @@ export function TaskDetailsPanel({
         syncEditorContent();
         recordHistorySnapshot();
         scheduleAutoSave();
-        void saveDetails();
       }
 
       updateLineControls();
@@ -1970,8 +2127,7 @@ export function TaskDetailsPanel({
       startImageResize(event.nativeEvent, handle, wrapper, () => {
         syncEditorContent();
         recordHistorySnapshot();
-        scheduleAutoSave();
-        void saveDetails();
+        requestSave("flush");
       });
       return;
     }
@@ -1992,8 +2148,7 @@ export function TaskDetailsPanel({
       () => {
         syncEditorContent();
         recordHistorySnapshot();
-        scheduleAutoSave();
-        void saveDetails();
+        requestSave("flush");
       },
     );
   }
@@ -2024,8 +2179,7 @@ export function TaskDetailsPanel({
 
       syncEditorContent();
       recordHistorySnapshot();
-      scheduleAutoSave();
-      void saveDetails();
+      requestSave("flush");
       updateLineControls();
       return;
     }
@@ -2188,12 +2342,18 @@ export function TaskDetailsPanel({
             </span>
           )}
         </div>
-        {taskId && saveStatus !== "idle" && (
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">
-            {saveStatus === "loading" && "Loading..."}
-            {saveStatus === "pending" && "Unsaved changes"}
-            {saveStatus === "saved" && "Saved"}
-            {saveStatus === "error" && "Something went wrong"}
+        {taskId &&
+          (saveStatus !== "idle" ||
+            showClipboardNotice ||
+            lastSavedAt !== null) && (
+          <span className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            {showClipboardNotice ? <span>Clipboard</span> : null}
+            {saveStatus === "loading" ? <span>Loading...</span> : null}
+            {saveStatus === "pending" ? <span>Unsaved changes</span> : null}
+            {saveStatus === "error" ? <span>Something went wrong</span> : null}
+            {lastSavedAt && saveStatus === "saved" ? (
+              <span>Saved · {formatSaveTime(lastSavedAt)}</span>
+            ) : null}
           </span>
         )}
       </div>

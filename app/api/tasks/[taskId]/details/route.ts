@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cleanupOrphanedTaskImages } from "@/lib/task-image-storage";
+import {
+  cleanupOrphanedTaskImages,
+  referencedTaskImagesChanged,
+} from "@/lib/task-image-storage";
 
 type RouteContext = {
   params: Promise<{ taskId: string }>;
@@ -27,13 +30,17 @@ export async function PUT(request: Request, context: RouteContext) {
 
   const { details } = body as { details: string };
 
-  const task = await prisma.task.findUnique({
+  const existing = await prisma.task.findUnique({
     where: { id: taskId },
-    select: { id: true },
+    select: { id: true, details: true },
   });
 
-  if (!task) {
+  if (!existing) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
+
+  if (existing.details === details) {
+    return NextResponse.json({ ok: true, skipped: true });
   }
 
   await prisma.task.update({
@@ -41,7 +48,9 @@ export async function PUT(request: Request, context: RouteContext) {
     data: { details },
   });
 
-  await cleanupOrphanedTaskImages(taskId, details);
+  if (referencedTaskImagesChanged(taskId, existing.details, details)) {
+    await cleanupOrphanedTaskImages(taskId, details);
+  }
 
   return NextResponse.json({ ok: true });
 }

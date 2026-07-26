@@ -92,7 +92,7 @@ function withPinnedDefaults(tasksByList: Record<string, Task[]>) {
 }
 
 const UNDO_VISIBLE_MS = 7000;
-const COMPLETION_DISPLAY_MS = 4000;
+const COMPLETION_DISPLAY_MS = 2000;
 
 function startOfDay(date: Date) {
   const next = new Date(date);
