@@ -2253,7 +2253,7 @@ export function TaskDetailsPanel({
   return (
     <section
       ref={panelRef}
-      className="relative min-w-0 flex-1 bg-[#fbfbfc] "
+      className="relative min-w-[300px] flex-1 bg-[#fbfbfc] "
     >
       <div className="relative flex items-center justify-between overflow-visible p-4">
         <div className="flex items-center gap-3">

@@ -177,6 +177,7 @@ type TaskListPanelProps = {
   completingTaskIds: Set<string>;
   selectedTaskId: string | null;
   expanded?: boolean;
+  panelWidth?: number;
   embedded?: boolean;
   showHeader?: boolean;
   showAddTask?: boolean;
@@ -224,6 +225,7 @@ export function TaskListPanel({
   completingTaskIds,
   selectedTaskId,
   expanded = false,
+  panelWidth,
   embedded = false,
   showHeader = true,
   showAddTask = false,
@@ -498,6 +500,13 @@ export function TaskListPanel({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [isSortMenuOpen]);
+
+  useEffect(() => {
+    if (orderedTasks.length < 2) {
+      setActiveSort(null);
+      setIsSortMenuOpen(false);
+    }
+  }, [orderedTasks.length]);
 
   useEffect(() => {
     if (!isAddingTask) return;
@@ -1202,12 +1211,25 @@ export function TaskListPanel({
 
   return (
     <section
-      className={`shrink-0 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 ${
-        embedded ? "w-[350px]" : "w-full max-w-[350px]"
+      style={
+        panelWidth != null
+          ? { width: panelWidth, minWidth: 300, flexShrink: 0 }
+          : undefined
+      }
+      className={`shrink-0 bg-white dark:bg-zinc-950 ${
+        panelWidth != null
+          ? "flex min-h-0 flex-col"
+          : embedded
+            ? "w-[350px] border-r border-zinc-200 dark:border-zinc-800"
+            : "w-full min-w-[250px] border-r border-zinc-200 dark:border-zinc-800"
       }`}
     >
       {title ? (
-        <div className="flex flex-col">
+        <div
+          className={`flex flex-col ${
+            panelWidth != null ? "min-h-0 flex-1" : ""
+          }`}
+        >
           {showHeader && (
             <header className="border-b border-zinc-200 pl-[26px] pr-4 py-3 dark:border-zinc-800">
               <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
@@ -1291,8 +1313,9 @@ export function TaskListPanel({
               <div className="flex-1" />
             )}
 
+            {orderedTasks.length >= 2 ? (
             <div
-              className="relative shrink-0"
+              className="relative shrink-0 flex items-center"
               ref={sortMenuRef}
               onMouseEnter={() => setIsSortMenuOpen(true)}
               onMouseLeave={() => setIsSortMenuOpen(false)}
@@ -1306,23 +1329,23 @@ export function TaskListPanel({
                 }
                 aria-haspopup="menu"
                 aria-expanded={isSortMenuOpen}
-                className="flex h-[31px] items-center gap-1 rounded-lg px-1 text-[14px] text-[#777777] transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 cursor-pointer"
+                className="flex h-[31px] items-center rounded-lg px-1 text-[14px] text-[#777777] transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 cursor-pointer"
               >
                 <BiSortAlt2 className="size-[15px] shrink-0" aria-hidden="true" />
                 {activeSort ? (
-                  <>
+                  <div className="flex ml-[1px]">
                     Sort:{" "}
-                    <span className="text-[11px] font-medium">
+                    <div className="text-[11px] font-medium ml-[1px] mt-[3.5px] cursor-pointer">
                       {formatActiveSortLabel(activeSort.label)}
-                    </span>
-                  </>
+                    </div>
+                  </div>
                 ) : (
                   "Sort"
                 )}
               </button>
 
               {isSortMenuOpen && (
-                <div className="absolute left-0 top-full z-20 min-w-[180px] pt-1">
+                <div className="absolute right-0 top-full z-50 min-w-[180px] pt-1">
                   <div
                     role="menu"
                     className="overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
@@ -1333,7 +1356,7 @@ export function TaskListPanel({
                         type="button"
                         role="menuitem"
                         onClick={() => applySort(option.field, option.direction)}
-                        className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80"
+                        className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80 cursor-pointer"
                       >
                         {option.label}
                       </button>
@@ -1342,8 +1365,14 @@ export function TaskListPanel({
                 </div>
               )}
             </div>
+            ) : null}
           </div>
 
+          <div
+            className={
+              panelWidth != null ? "min-h-0 flex-1 overflow-y-auto" : undefined
+            }
+          >
           {showAddTask && pinnedVisibleTasks.length > 0 && (
             <div className="mb-2 border-b border-zinc-200 bg-zinc-50/40 dark:border-zinc-700 dark:bg-zinc-900/40">
               <p className="px-4 pb-1 pt-2.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 dark:text-zinc-400">
@@ -1421,6 +1450,7 @@ export function TaskListPanel({
               </button>
             </div>
           ) : null}
+          </div>
         </div>
       ) : (
         <div className="p-4">

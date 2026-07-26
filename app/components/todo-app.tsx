@@ -19,15 +19,21 @@ import {
   updateTaskPinned as updateTaskPinnedInDb,
   updateTaskImportant as updateTaskImportantInDb,
 } from "@/app/actions/todo";
+import type { TaskParentUpdate } from "@/app/actions/todo";
 import type { TaskDueTime } from "@/lib/task-due-time";
 import { taskDetailsHasContent } from "@/lib/task-details-content";
 import { Sidebar } from "./sidebar";
 import { CalendarPanel, CalendarMonthView } from "./calendar-panel";
 import { TaskDetailsPanel } from "./task-details-panel";
+import { PanelResizeHandle } from "./panel-resize-handle";
 import { TaskListPanel } from "./task-list-panel";
 import { mergeReorderedPinnedTasks, mergeReorderedUnpinnedTasks } from "./task-reorder";
 import { AppFontSwitcher } from "./app-font-switcher";
 import { UndoButton } from "./undo-button";
+
+const MIN_PANEL_WIDTH = 300;
+const DEFAULT_TASK_LIST_WIDTH = 350;
+const RESIZE_HANDLE_WIDTH = 4;
 
 export type TaskLabel = {
   id: string;
@@ -71,6 +77,52 @@ type PendingUndo = {
   listId: string;
   taskName: string;
 };
+
+type ListTasksSnapshot = {
+  listId: string;
+  tasks: Task[];
+};
+
+function cloneListTasks(tasks: Task[]): Task[] {
+  return tasks.map((task) => ({
+    ...task,
+    labels: [...task.labels],
+  }));
+}
+
+function collectParentUpdates(
+  currentTasks: Task[],
+  targetTasks: Task[],
+): TaskParentUpdate[] {
+  const targetById = new Map(
+    targetTasks.map((task) => [task.id, task.parentId ?? null]),
+  );
+  const updates: TaskParentUpdate[] = [];
+  const seen = new Set<string>();
+
+  for (const task of currentTasks) {
+    const targetParentId = targetById.get(task.id);
+    if (targetParentId === undefined) continue;
+
+    const currentParentId = task.parentId ?? null;
+    if (currentParentId !== targetParentId && !seen.has(task.id)) {
+      updates.push({ taskId: task.id, parentId: targetParentId });
+      seen.add(task.id);
+    }
+  }
+
+  return updates;
+}
+
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.isContentEditable
+  );
+}
 
 type TodoAppProps = {
   initialLists: TodoList[];
@@ -292,12 +344,77 @@ export function TodoApp({
     () => new Set(),
   );
   const undoTimerRef = useRef<number | null>(null);
+  const reorderUndoStackRef = useRef<ListTasksSnapshot[]>([]);
+  const reorderRedoStackRef = useRef<ListTasksSnapshot[]>([]);
+  const tasksByListRef = useRef(tasksByList);
+  const isApplyingReorderHistoryRef = useRef(false);
+  tasksByListRef.current = tasksByList;
   const completionTimerRef = useRef<Record<string, number>>({});
   const [isListCalendarOpen, setIsListCalendarOpen] = useState(false);
   const listCalendarButtonRef = useRef<HTMLButtonElement>(null);
   const listCalendarPanelRef = useRef<HTMLDivElement>(null);
   const listCalendarReturnTaskIdRef = useRef<string | null>(null);
   const listCalendarCloseTimerRef = useRef<number | null>(null);
+  const [taskListWidth, setTaskListWidth] = useState(DEFAULT_TASK_LIST_WIDTH);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const taskListWidthRef = useRef(taskListWidth);
+  taskListWidthRef.current = taskListWidth;
+
+  const clampTaskListWidth = useCallback((width: number) => {
+    const container = splitContainerRef.current;
+    if (!container) {
+      return Math.max(MIN_PANEL_WIDTH, width);
+    }
+
+    const containerWidth = container.getBoundingClientRect().width;
+    const maxWidth = containerWidth - MIN_PANEL_WIDTH - RESIZE_HANDLE_WIDTH;
+    return Math.min(maxWidth, Math.max(MIN_PANEL_WIDTH, width));
+  }, []);
+
+  const handleTaskListResizeStart = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = taskListWidthRef.current;
+      const pointerId = event.pointerId;
+      const handle = event.currentTarget;
+      handle.setPointerCapture(pointerId);
+
+      const onPointerMove = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== pointerId) return;
+        setTaskListWidth(
+          clampTaskListWidth(startWidth + (moveEvent.clientX - startX)),
+        );
+      };
+
+      const onPointerUp = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== pointerId) return;
+        handle.releasePointerCapture(pointerId);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+      };
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", onPointerUp);
+    },
+    [clampTaskListWidth],
+  );
+
+  useEffect(() => {
+    const container = splitContainerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => {
+      setTaskListWidth((currentWidth) => clampTaskListWidth(currentWidth));
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [clampTaskListWidth]);
 
   const displayedTaskId =
     hoveredTaskId && hoveredTaskId !== selectedTaskId
@@ -416,6 +533,108 @@ export function TodoApp({
     clearUndoTimer();
     setPendingUndo(null);
   }, [clearUndoTimer]);
+
+  const applyListSnapshot = useCallback(async (snapshot: ListTasksSnapshot) => {
+    const { listId, tasks } = snapshot;
+    const currentTasks = tasksByListRef.current[listId] ?? [];
+    const parentUpdates = collectParentUpdates(currentTasks, tasks);
+    const taskIds = tasks.map((task) => task.id);
+
+    setTasksByList((current) => ({
+      ...current,
+      [listId]: cloneListTasks(tasks),
+    }));
+
+    await reorderTasksInDb(listId, taskIds, parentUpdates);
+  }, []);
+
+  const handleReorderUndo = useCallback(async () => {
+    if (isApplyingReorderHistoryRef.current) return;
+
+    const undoStack = reorderUndoStackRef.current;
+    if (undoStack.length === 0) return;
+
+    isApplyingReorderHistoryRef.current = true;
+
+    try {
+      const snapshot = undoStack[undoStack.length - 1];
+      reorderUndoStackRef.current = undoStack.slice(0, -1);
+
+      const currentTasks = tasksByListRef.current[snapshot.listId] ?? [];
+      reorderRedoStackRef.current = [
+        ...reorderRedoStackRef.current,
+        {
+          listId: snapshot.listId,
+          tasks: cloneListTasks(currentTasks),
+        },
+      ];
+
+      await applyListSnapshot(snapshot);
+    } finally {
+      isApplyingReorderHistoryRef.current = false;
+    }
+  }, [applyListSnapshot]);
+
+  const handleReorderRedo = useCallback(async () => {
+    if (isApplyingReorderHistoryRef.current) return;
+
+    const redoStack = reorderRedoStackRef.current;
+    if (redoStack.length === 0) return;
+
+    isApplyingReorderHistoryRef.current = true;
+
+    try {
+      const snapshot = redoStack[redoStack.length - 1];
+      reorderRedoStackRef.current = redoStack.slice(0, -1);
+
+      const currentTasks = tasksByListRef.current[snapshot.listId] ?? [];
+      reorderUndoStackRef.current = [
+        ...reorderUndoStackRef.current,
+        {
+          listId: snapshot.listId,
+          tasks: cloneListTasks(currentTasks),
+        },
+      ];
+
+      await applyListSnapshot(snapshot);
+    } finally {
+      isApplyingReorderHistoryRef.current = false;
+    }
+  }, [applyListSnapshot]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (isTypingTarget(event.target)) return;
+
+      const isMod = event.metaKey || event.ctrlKey;
+      if (!isMod) return;
+
+      const key = event.key.toLowerCase();
+
+      if (key === "z" && event.shiftKey) {
+        if (reorderRedoStackRef.current.length === 0) return;
+        event.preventDefault();
+        void handleReorderRedo();
+        return;
+      }
+
+      if (key === "z") {
+        if (reorderUndoStackRef.current.length === 0) return;
+        event.preventDefault();
+        void handleReorderUndo();
+        return;
+      }
+
+      if (key === "y" && event.ctrlKey && !event.metaKey) {
+        if (reorderRedoStackRef.current.length === 0) return;
+        event.preventDefault();
+        void handleReorderRedo();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleReorderRedo, handleReorderUndo]);
 
   useEffect(() => {
     return () => {
@@ -991,6 +1210,7 @@ export function TodoApp({
     parentUpdates: Array<{ taskId: string; parentId: string | null }> = [],
   ) {
     let mergedTaskIds: string[] | null = null;
+    let previousSnapshot: ListTasksSnapshot | null = null;
 
     setTasksByList((current) => {
       const currentTasks = current[listId] ?? [];
@@ -1022,13 +1242,36 @@ export function TodoApp({
 
       mergedTaskIds = mergedTasks.map((task) => task.id);
 
+      const previousIds = currentTasks.map((task) => task.id);
+      const orderChanged = mergedTaskIds.join(",") !== previousIds.join(",");
+      const parentChanged = parentUpdates.some((update) => {
+        const task = currentTasks.find((item) => item.id === update.taskId);
+        return task && (task.parentId ?? null) !== update.parentId;
+      });
+
+      if (!orderChanged && !parentChanged) {
+        mergedTaskIds = null;
+        return current;
+      }
+
+      previousSnapshot = {
+        listId,
+        tasks: cloneListTasks(currentTasks),
+      };
+
       return {
         ...current,
         [listId]: mergedTasks,
       };
     });
 
-    if (!mergedTaskIds) return;
+    if (!mergedTaskIds || !previousSnapshot) return;
+
+    reorderUndoStackRef.current = [
+      ...reorderUndoStackRef.current,
+      previousSnapshot,
+    ];
+    reorderRedoStackRef.current = [];
 
     await reorderTasksInDb(listId, mergedTaskIds, parentUpdates);
   }
@@ -1180,15 +1423,19 @@ export function TodoApp({
             onLabelsChanged={refreshLabels}
             onMoveTaskToList={moveTaskToList}
           />
-        ) : (
-          <>
+        ) : showRightPanel ? (
+          <div
+            ref={splitContainerRef}
+            className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
+          >
             <TaskListPanel
               title={taskListTitle}
               tasks={taskListItems}
               lists={lists}
               completingTaskIds={completingTaskIds}
               selectedTaskId={selectedTaskId}
-              expanded={!showRightPanel}
+              panelWidth={taskListWidth}
+              expanded={false}
               showAddTask={
                 selectedListId !== null ||
                 (activeView === "today" && lists.length > 0)
@@ -1216,35 +1463,75 @@ export function TodoApp({
               onListCalendarHoverStart={openListCalendar}
               onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
             />
-            {isListCalendarOpen && (
-              <div
-                ref={listCalendarPanelRef}
-                onMouseEnter={cancelListCalendarClose}
-                onMouseLeave={handleListCalendarPanelMouseLeave}
-                className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
-              >
-                <CalendarMonthView
-                  tasks={taskListItems}
-                  selectedTaskId={selectedTaskId}
-                  onSelectTask={setSelectedTaskId}
-                  onToggleTask={toggleTask}
-                  onSetTaskDueDate={setTaskDueDate}
-                  onSetTaskDueTime={setTaskDueTime}
+            <PanelResizeHandle onPointerDown={handleTaskListResizeStart} />
+            <div className="flex min-h-0 min-w-[300px] flex-1 flex-col overflow-hidden">
+              {isListCalendarOpen && (
+                <div
+                  ref={listCalendarPanelRef}
+                  onMouseEnter={cancelListCalendarClose}
+                  onMouseLeave={handleListCalendarPanelMouseLeave}
+                  className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white dark:bg-zinc-950"
+                >
+                  <CalendarMonthView
+                    tasks={taskListItems}
+                    selectedTaskId={selectedTaskId}
+                    onSelectTask={setSelectedTaskId}
+                    onToggleTask={toggleTask}
+                    onSetTaskDueDate={setTaskDueDate}
+                    onSetTaskDueTime={setTaskDueTime}
+                  />
+                </div>
+              )}
+              {showTaskDetails && (
+                <TaskDetailsPanel
+                  taskId={displayedTaskId}
+                  isHoverPreview={isHoverPreview}
+                  taskSnapshot={isHoverPreview ? null : selectedTaskSnapshot}
+                  focusNoteAtEndRequest={focusNoteAtEndRequest}
+                  onDetailsSaved={handleDetailsSaved}
+                  onTaskHasDetailsKnown={handleTaskHasDetailsKnown}
+                  onTaskRenamed={handleTaskRenamed}
+                  onDueDateUpdated={handleDueDateUpdated}
                 />
-              </div>
-            )}
-            {showTaskDetails && (
-              <TaskDetailsPanel
-                taskId={displayedTaskId}
-                isHoverPreview={isHoverPreview}
-                taskSnapshot={isHoverPreview ? null : selectedTaskSnapshot}
-                focusNoteAtEndRequest={focusNoteAtEndRequest}
-                onDetailsSaved={handleDetailsSaved}
-                onTaskHasDetailsKnown={handleTaskHasDetailsKnown}
-                onTaskRenamed={handleTaskRenamed}
-                onDueDateUpdated={handleDueDateUpdated}
-              />
-            )}
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <TaskListPanel
+              title={taskListTitle}
+              tasks={taskListItems}
+              lists={lists}
+              completingTaskIds={completingTaskIds}
+              selectedTaskId={selectedTaskId}
+              expanded
+              showAddTask={
+                selectedListId !== null ||
+                (activeView === "today" && lists.length > 0)
+              }
+              isLabelFilter={selectedLabelId !== null}
+              listId={selectedListId}
+              onAddTask={addTask}
+              onToggleTask={toggleTask}
+              onSelectTask={setSelectedTaskId}
+              onRenameTask={renameTask}
+              onTaskNameChange={handleTaskRenamed}
+              onReorderTasks={reorderTasks}
+              onSetTaskDueDate={setTaskDueDate}
+              onSetTaskDueTime={setTaskDueTime}
+              onSetTaskPriority={setTaskPriority}
+              onSetTaskPinned={setTaskPinned}
+              onSetTaskImportant={setTaskImportant}
+              onToggleTaskLabel={toggleTaskLabel}
+              onLabelsChanged={refreshLabels}
+              onMoveTaskToList={moveTaskToList}
+              onTaskHoverStart={handleTaskHoverStart}
+              onTaskHoverEnd={() => setHoveredTaskId(null)}
+              showListCalendarButton={selectedListId !== null}
+              listCalendarButtonRef={listCalendarButtonRef}
+              onListCalendarHoverStart={openListCalendar}
+              onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
+            />
           </>
         )}
       </div>
