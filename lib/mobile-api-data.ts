@@ -118,7 +118,8 @@ export type TasksQuery =
   | { view: "list"; listId: string }
   | { view: "today" }
   | { view: "important" }
-  | { view: "label"; labelId: string };
+  | { view: "label"; labelId: string }
+  | { view: "calendar" };
 
 export async function getTasksApiData(query: TasksQuery): Promise<TasksApiResponse> {
   const { lists, labels, tasksByList } = await getTodoData();
@@ -165,6 +166,26 @@ export async function getTasksApiData(query: TasksQuery): Promise<TasksApiRespon
 
     return {
       title: "Important",
+      pinned: [],
+      tasks,
+    };
+  }
+
+  if (query.view === "calendar") {
+    const tasks = lists
+      .flatMap((list) =>
+        (tasksByList[list.id] ?? [])
+          .filter((task) => !task.completed && task.dueDate)
+          .map((task) => mapToMobileTask({ ...task, depth: 0 }, list.id, list.name)),
+      )
+      .sort((a, b) => {
+        const aTime = new Date(a.dueDate!).getTime();
+        const bTime = new Date(b.dueDate!).getTime();
+        return aTime - bTime;
+      });
+
+    return {
+      title: "Calendar",
       pinned: [],
       tasks,
     };

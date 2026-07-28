@@ -18,6 +18,10 @@ function parseTasksQuery(searchParams: URLSearchParams): TasksQuery | null {
     return { view: "important" };
   }
 
+  if (view === "calendar") {
+    return { view: "calendar" };
+  }
+
   if (view === "label" && labelId) {
     return { view: "label", labelId };
   }
