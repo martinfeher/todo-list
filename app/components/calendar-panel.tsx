@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BiChevronLeft, BiChevronRight } from "react-icons/bi";
+import { CalendarAddTaskPopover } from "./calendar-add-task-popover";
 import { CalendarTaskPopover } from "./calendar-task-popover";
 import { TaskCompletionCheckbox } from "./task-completion-checkbox";
 import { TaskListPanel } from "./task-list-panel";
@@ -32,6 +33,13 @@ type CalendarPanelProps = {
     sourceListId: string,
     targetListId: string,
   ) => void;
+  onAddCalendarTask?: (payload: {
+    name: string;
+    dueDate: string;
+    details: string;
+    listId: string;
+  }) => void | Promise<void>;
+  defaultListId?: string | null;
 };
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -135,24 +143,46 @@ function CalendarTabs({
 
 export function CalendarMonthView({
   tasks,
+  lists,
   selectedTaskId,
   onSelectTask,
   onToggleTask,
   onSetTaskDueDate,
   onSetTaskDueTime,
+  onMoveTaskToList,
+  onAddCalendarTask,
+  defaultListId = null,
 }: {
   tasks: TaskListItem[];
+  lists: TodoList[];
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
   onToggleTask: (taskId: string) => void;
   onSetTaskDueDate?: (taskId: string, dateValue: string | null) => void;
   onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
+  onMoveTaskToList?: (
+    taskId: string,
+    sourceListId: string,
+    targetListId: string,
+  ) => void;
+  onAddCalendarTask?: (payload: {
+    name: string;
+    dueDate: string;
+    details: string;
+    listId: string;
+  }) => void | Promise<void>;
+  defaultListId?: string | null;
 }) {
-  const today = useMemo(() => startOfDay(new Date()), []);
-  const [monthDate, setMonthDate] = useState(() => startOfDay(new Date()));
-  const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()));
+  const [today, setToday] = useState<Date | null>(null);
+  const [monthDate, setMonthDate] = useState<Date | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [taskPopover, setTaskPopover] = useState<{
     task: TaskListItem;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [addTaskPopover, setAddTaskPopover] = useState<{
+    date: Date;
     x: number;
     y: number;
   } | null>(null);
@@ -161,6 +191,13 @@ export function CalendarMonthView({
   );
   const dragStateRef = useRef<CalendarTaskDragState | null>(null);
   const suppressTaskClickRef = useRef(false);
+
+  useEffect(() => {
+    const now = startOfDay(new Date());
+    setToday(now);
+    setMonthDate(now);
+    setSelectedDate(now);
+  }, []);
 
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskListItem[]>();
@@ -180,13 +217,13 @@ export function CalendarMonthView({
     return map;
   }, [tasks]);
 
-  const monthDays = useMemo(
-    () => getFullMonthDays(monthDate.getFullYear(), monthDate.getMonth()),
-    [monthDate],
-  );
-  const monthRowCount = Math.ceil(monthDays.length / 7);
+  const monthDays = useMemo(() => {
+    if (!monthDate) return [];
+    return getFullMonthDays(monthDate.getFullYear(), monthDate.getMonth());
+  }, [monthDate]);
+  const monthRowCount = Math.max(1, Math.ceil(monthDays.length / 7));
 
-  const selectedDateKey = toDateKey(selectedDate);
+  const selectedDateKey = selectedDate ? toDateKey(selectedDate) : "";
   const selectedDayTasks = tasksByDate.get(selectedDateKey) ?? [];
   const popoverTask = useMemo(() => {
     if (!taskPopover) return null;
@@ -194,15 +231,47 @@ export function CalendarMonthView({
   }, [taskPopover, tasks]);
 
   function goToPreviousMonth() {
+    if (!monthDate) return;
     setMonthDate(
       startOfDay(new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1)),
     );
   }
 
   function goToNextMonth() {
+    if (!monthDate) return;
     setMonthDate(
       startOfDay(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1)),
     );
+  }
+
+  function handleDayClick(
+    event:
+      | React.MouseEvent<HTMLDivElement>
+      | React.KeyboardEvent<HTMLDivElement>,
+    day: Date,
+  ) {
+    setSelectedDate(day);
+    setTaskPopover(null);
+
+    if (!onAddCalendarTask || lists.length === 0) return;
+
+    let x: number;
+    let y: number;
+
+    if ("clientX" in event) {
+      x = event.clientX;
+      y = event.clientY;
+    } else {
+      const rect = event.currentTarget.getBoundingClientRect();
+      x = rect.left + rect.width / 2;
+      y = rect.top + rect.height / 2;
+    }
+
+    setAddTaskPopover({
+      date: day,
+      x,
+      y,
+    });
   }
 
   function handleCalendarTaskClick(
@@ -219,6 +288,7 @@ export function CalendarMonthView({
 
     setSelectedDate(day);
     onSelectTask(task.id);
+    setAddTaskPopover(null);
     setTaskPopover({
       task,
       x: event.clientX,
@@ -330,8 +400,28 @@ export function CalendarMonthView({
   }
 
   useEffect(() => {
+    if (!monthDate) return;
     setTaskPopover(null);
+    setAddTaskPopover(null);
   }, [monthDate]);
+
+  if (!monthDate || !selectedDate || !today) {
+    return (
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
+          <div className="mx-auto flex h-full w-full max-w-6xl min-h-0 flex-col">
+            <div className="mb-4 h-8 w-40 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
+            <div className="min-h-0 flex-1 animate-pulse rounded-lg bg-zinc-50 dark:bg-zinc-900/40" />
+          </div>
+        </div>
+        <aside className="flex w-[320px] shrink-0 flex-col border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <div className="h-5 w-32 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
+          </div>
+        </aside>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -396,6 +486,8 @@ export function CalendarMonthView({
               const isCurrentMonth = day.getMonth() === monthDate.getMonth();
 
               const isDropTarget = dropTargetDateKey === dateKey;
+              const isActiveDay =
+                addTaskPopover !== null && isSameDay(day, addTaskPopover.date);
 
               return (
                 <div
@@ -403,19 +495,21 @@ export function CalendarMonthView({
                   data-calendar-day={dateKey}
                   role="button"
                   tabIndex={0}
-                  onClick={() => setSelectedDate(day)}
+                  onClick={(event) => handleDayClick(event, day)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      setSelectedDate(day);
+                      handleDayClick(event, day);
                     }
                   }}
                   className={`h-full cursor-pointer border-r border-b border-zinc-200 p-2 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/60 ${
                     isDropTarget
                       ? "bg-blue-50 ring-2 ring-inset ring-blue-400 dark:bg-blue-950/30 dark:ring-blue-500"
-                      : isSelected
-                        ? "bg-zinc-100 ring-1 ring-inset ring-zinc-300 dark:bg-zinc-900 dark:ring-zinc-600"
-                        : "bg-white dark:bg-zinc-950"
+                      : isActiveDay
+                        ? "bg-blue-50 ring-2 ring-inset ring-[#4873c7] dark:bg-blue-950/30 dark:ring-[#7da2ff]"
+                        : isSelected
+                          ? "bg-zinc-100 ring-1 ring-inset ring-zinc-300 dark:bg-zinc-900 dark:ring-zinc-600"
+                          : "bg-white dark:bg-zinc-950"
                   }`}
                 >
                   <span
@@ -435,12 +529,14 @@ export function CalendarMonthView({
                       <button
                         key={task.id}
                         type="button"
-                        onClick={(event) =>
-                          handleCalendarTaskClick(event, task, day)
-                        }
-                        onPointerDown={(event) =>
-                          handleCalendarTaskPointerDown(event, task, day)
-                        }
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleCalendarTaskClick(event, task, day);
+                        }}
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                          handleCalendarTaskPointerDown(event, task, day);
+                        }}
                         className={`block w-full truncate rounded px-1 py-0.5 text-left text-[11px] transition-colors touch-none ${
                           onSetTaskDueDate
                             ? "cursor-grab active:cursor-grabbing"
@@ -516,14 +612,28 @@ export function CalendarMonthView({
         </ul>
       </aside>
 
+      {addTaskPopover && onAddCalendarTask ? (
+        <CalendarAddTaskPopover
+          date={addTaskPopover.date}
+          lists={lists}
+          defaultListId={defaultListId}
+          x={addTaskPopover.x}
+          y={addTaskPopover.y}
+          onClose={() => setAddTaskPopover(null)}
+          onAddTask={onAddCalendarTask}
+        />
+      ) : null}
+
       {popoverTask && taskPopover ? (
         <CalendarTaskPopover
           task={popoverTask}
+          lists={lists}
           x={taskPopover.x}
           y={taskPopover.y}
           onClose={() => setTaskPopover(null)}
           onSetTaskDueDate={onSetTaskDueDate}
           onSetTaskDueTime={onSetTaskDueTime}
+          onMoveTaskToList={onMoveTaskToList}
         />
       ) : null}
     </div>
@@ -544,6 +654,8 @@ export function CalendarPanel({
   onToggleTaskLabel,
   onLabelsChanged,
   onMoveTaskToList,
+  onAddCalendarTask,
+  defaultListId,
 }: CalendarPanelProps) {
   const [activeTab, setActiveTab] = useState<CalendarTab>("calendar");
 
@@ -577,11 +689,15 @@ export function CalendarPanel({
       ) : (
         <CalendarMonthView
           tasks={tasks}
+          lists={lists}
           selectedTaskId={selectedTaskId}
           onSelectTask={onSelectTask}
           onToggleTask={onToggleTask}
           onSetTaskDueDate={onSetTaskDueDate}
           onSetTaskDueTime={onSetTaskDueTime}
+          onMoveTaskToList={onMoveTaskToList}
+          onAddCalendarTask={onAddCalendarTask}
+          defaultListId={defaultListId}
         />
       )}
     </section>

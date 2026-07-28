@@ -2,43 +2,88 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BiCalendar, BiListUl } from "react-icons/bi";
+import { fetchTaskById } from "@/lib/task-details-api";
+import { taskDetailsHasContent } from "@/lib/task-details-content";
 import { TaskDatePicker } from "./task-date-picker";
-import type { TaskListItem } from "./todo-app";
+import { TaskMoveToSelector } from "./task-move-to-selector";
+import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
 
 type CalendarTaskPopoverProps = {
   task: TaskListItem;
+  lists: TodoList[];
   x: number;
   y: number;
   onClose: () => void;
   onSetTaskDueDate?: (taskId: string, dateValue: string | null) => void;
   onSetTaskDueTime?: (taskId: string, dueTime: TaskDueTime) => void;
+  onMoveTaskToList?: (
+    taskId: string,
+    sourceListId: string,
+    targetListId: string,
+  ) => void;
 };
 
-function detailsToPlainText(details: string): string {
-  if (!details.trim()) return "";
-
-  const container = document.createElement("div");
-  container.innerHTML = details;
-  return (container.textContent ?? "").replace(/\s+/g, " ").trim();
-}
+const detailsCache = new Map<string, string>();
 
 export function CalendarTaskPopover({
   task,
+  lists,
   x,
   y,
   onClose,
   onSetTaskDueDate,
   onSetTaskDueTime,
+  onMoveTaskToList,
 }: CalendarTaskPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const dateButtonRef = useRef<HTMLButtonElement>(null);
   const dateMenuRef = useRef<HTMLDivElement>(null);
+  const listButtonRef = useRef<HTMLButtonElement>(null);
+  const listMenuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: x, top: y + 8 });
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [isListMenuOpen, setIsListMenuOpen] = useState(false);
+  const [listQuery, setListQuery] = useState("");
 
-  const content = detailsToPlainText(task.details);
+  const hasLoadedDetails = taskDetailsHasContent(task.details);
+  const [fetchedDetails, setFetchedDetails] = useState<string | null>(() => {
+    if (hasLoadedDetails) return null;
+    return detailsCache.get(task.id) ?? null;
+  });
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  const previewDetails = hasLoadedDetails
+    ? task.details
+    : (fetchedDetails ?? detailsCache.get(task.id) ?? "");
+  const hasContent = taskDetailsHasContent(previewDetails);
   const hasDateActions = Boolean(onSetTaskDueDate);
+  const hasListActions = Boolean(onMoveTaskToList && task.listId && lists.length > 0);
+
+  useEffect(() => {
+    if (!task.hasDetails || hasLoadedDetails || fetchedDetails !== null) return;
+
+    let cancelled = false;
+    setIsLoadingDetails(true);
+
+    fetchTaskById(task.id)
+      .then((loadedTask) => {
+        if (cancelled) return;
+        const loaded = loadedTask?.details ?? "";
+        detailsCache.set(task.id, loaded);
+        setFetchedDetails(loaded);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingDetails(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [task.id, task.hasDetails, hasLoadedDetails, fetchedDetails]);
 
   useLayoutEffect(() => {
     const popover = popoverRef.current;
@@ -60,7 +105,7 @@ export function CalendarTaskPopover({
 
     left = Math.max(padding, left);
     setPosition({ left, top });
-  }, [x, y, task.id, isDatePickerOpen]);
+  }, [x, y, task.id, isDatePickerOpen, isListMenuOpen, hasContent, isLoadingDetails]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -71,6 +116,11 @@ export function CalendarTaskPopover({
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (isListMenuOpen) {
+        setIsListMenuOpen(false);
+        setListQuery("");
+        return;
+      }
       if (isDatePickerOpen) {
         setIsDatePickerOpen(false);
         return;
@@ -85,7 +135,7 @@ export function CalendarTaskPopover({
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onClose, isDatePickerOpen]);
+  }, [onClose, isDatePickerOpen, isListMenuOpen]);
 
   useEffect(() => {
     if (!isDatePickerOpen) return;
@@ -103,6 +153,23 @@ export function CalendarTaskPopover({
     };
   }, [isDatePickerOpen]);
 
+  useEffect(() => {
+    if (!isListMenuOpen) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (listMenuRef.current?.contains(target)) return;
+      if (listButtonRef.current?.contains(target)) return;
+      setIsListMenuOpen(false);
+      setListQuery("");
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [isListMenuOpen]);
+
   function handleToggleDatePicker() {
     setIsDatePickerOpen((open) => !open);
   }
@@ -114,6 +181,26 @@ export function CalendarTaskPopover({
   function handleSaveDueTime(dueTime: TaskDueTime) {
     onSetTaskDueTime?.(task.id, dueTime);
     setIsDatePickerOpen(false);
+  }
+
+  function handleToggleListMenu() {
+    setIsListMenuOpen((open) => !open);
+    if (isListMenuOpen) {
+      setListQuery("");
+    }
+  }
+
+  function handleSelectList(targetListId: string) {
+    if (!task.listId || !onMoveTaskToList || targetListId === task.listId) return;
+
+    onMoveTaskToList(task.id, task.listId, targetListId);
+    setIsListMenuOpen(false);
+    setListQuery("");
+  }
+
+  function handleCancelListMenu() {
+    setIsListMenuOpen(false);
+    setListQuery("");
   }
 
   return (
@@ -173,21 +260,63 @@ export function CalendarTaskPopover({
       </div>
 
       <div className="px-4 py-3">
-        {content ? (
-          <p className="line-clamp-6 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
-            {content}
-          </p>
+        {isLoadingDetails ? (
+          <p className="text-sm text-zinc-400 dark:text-zinc-500">Loading...</p>
+        ) : hasContent ? (
+          <div
+            className="task-details-editor max-h-36 overflow-hidden text-sm leading-relaxed text-zinc-600 dark:text-zinc-300 [&_.detail-line]:my-0"
+            dangerouslySetInnerHTML={{ __html: previewDetails }}
+          />
         ) : (
           <p className="text-sm text-zinc-400 dark:text-zinc-500">No description</p>
         )}
       </div>
 
       {task.listName ? (
-        <div className="flex items-center gap-2 border-t border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
-          <BiListUl className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
-          <span className="truncate text-sm text-zinc-500 dark:text-zinc-400">
-            {task.listName}
-          </span>
+        <div className="relative border-t border-zinc-100 dark:border-zinc-800">
+          {hasListActions ? (
+            <button
+              ref={listButtonRef}
+              type="button"
+              aria-label={`Move task to another list. Currently in ${task.listName}`}
+              aria-haspopup="dialog"
+              aria-expanded={isListMenuOpen}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleToggleListMenu();
+              }}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+            >
+              <BiListUl className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
+              <span className="truncate text-sm text-zinc-500 dark:text-zinc-400">
+                {task.listName}
+              </span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 px-4 py-2.5">
+              <BiListUl className="size-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
+              <span className="truncate text-sm text-zinc-500 dark:text-zinc-400">
+                {task.listName}
+              </span>
+            </div>
+          )}
+
+          {isListMenuOpen && hasListActions ? (
+            <div
+              ref={listMenuRef}
+              className="absolute bottom-full left-3 z-10 mb-1"
+            >
+              <TaskMoveToSelector
+                lists={lists}
+                currentListId={task.listId ?? null}
+                query={listQuery}
+                onQueryChange={setListQuery}
+                onSelectList={handleSelectList}
+                onCancel={handleCancelListMenu}
+                showCurrentList
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

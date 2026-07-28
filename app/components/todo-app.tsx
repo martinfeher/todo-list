@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createTask,
   createTodoList,
@@ -18,12 +19,14 @@ import {
   updateTaskPriority as updateTaskPriorityInDb,
   updateTaskPinned as updateTaskPinnedInDb,
   updateTaskImportant as updateTaskImportantInDb,
+  updateTaskDetails as updateTaskDetailsInDb,
 } from "@/app/actions/todo";
 import type { TaskParentUpdate } from "@/app/actions/todo";
 import type { TaskDueTime } from "@/lib/task-due-time";
 import { taskDetailsHasContent } from "@/lib/task-details-content";
 import { Sidebar } from "./sidebar";
 import { CalendarPanel, CalendarMonthView } from "./calendar-panel";
+import { plainTextToTaskDetails } from "./calendar-add-task-popover";
 import { TaskDetailsPanel } from "./task-details-panel";
 import { PanelResizeHandle } from "./panel-resize-handle";
 import { TaskListPanel } from "./task-list-panel";
@@ -128,6 +131,7 @@ type TodoAppProps = {
   initialLists: TodoList[];
   initialLabels: TaskLabel[];
   initialTasksByList: Record<string, Task[]>;
+  initialActiveView?: ActiveView;
 };
 
 function withPinnedDefaults(tasksByList: Record<string, Task[]>) {
@@ -221,6 +225,8 @@ type ActiveView =
   | "important"
   | "calendar"
   | null;
+
+export type TodoActiveView = ActiveView;
 
 function getVisibleTasks(
   activeView: ActiveView,
@@ -327,7 +333,10 @@ export function TodoApp({
   initialLists,
   initialLabels,
   initialTasksByList,
+  initialActiveView = null,
 }: TodoAppProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [lists, setLists] = useState(initialLists);
   const [labels, setLabels] = useState(initialLabels);
   const [selectedListId, setSelectedListId] = useState<string | null>(null);
@@ -335,7 +344,7 @@ export function TodoApp({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
   const [focusNoteAtEndRequest, setFocusNoteAtEndRequest] = useState(0);
-  const [activeView, setActiveView] = useState<ActiveView>(null);
+  const [activeView, setActiveView] = useState<ActiveView>(initialActiveView);
   const [tasksByList, setTasksByList] = useState(() =>
     withPinnedDefaults(initialTasksByList),
   );
@@ -492,6 +501,22 @@ export function TodoApp({
       ),
     [lists, tasksByList],
   );
+
+  const taskCountByLabelId = useMemo(() => {
+    const counts: Record<string, number> = {};
+
+    for (const list of lists) {
+      for (const task of tasksByList[list.id] ?? []) {
+        if (task.completed) continue;
+
+        for (const label of task.labels) {
+          counts[label.id] = (counts[label.id] ?? 0) + 1;
+        }
+      }
+    }
+
+    return counts;
+  }, [lists, tasksByList]);
 
   const visibleLabels = useMemo(() => {
     const labelIdsWithTasks = new Set<string>();
@@ -684,7 +709,25 @@ export function TodoApp({
     void getLabels().then(setLabels);
   }, []);
 
+  const leaveCalendarRoute = useCallback(() => {
+    if (pathname === "/calendar") {
+      router.push("/");
+    }
+  }, [pathname, router]);
+
+  useEffect(() => {
+    if (pathname === "/calendar") {
+      setActiveView("calendar");
+      setSelectedLabelId(null);
+      setSelectedListId(null);
+      return;
+    }
+
+    setActiveView((current) => (current === "calendar" ? null : current));
+  }, [pathname]);
+
   function selectList(listId: string) {
+    leaveCalendarRoute();
     setActiveView(null);
     setSelectedLabelId(null);
     setSelectedListId(listId);
@@ -694,6 +737,7 @@ export function TodoApp({
   }
 
   function selectToday() {
+    leaveCalendarRoute();
     setActiveView("today");
     setSelectedLabelId(null);
     setSelectedListId(null);
@@ -714,6 +758,7 @@ export function TodoApp({
   */
 
   function selectImportant() {
+    leaveCalendarRoute();
     setActiveView("important");
     setSelectedLabelId(null);
     setSelectedListId(null);
@@ -723,6 +768,9 @@ export function TodoApp({
   }
 
   function selectCalendar() {
+    if (pathname !== "/calendar") {
+      router.push("/calendar");
+    }
     setActiveView("calendar");
     setSelectedLabelId(null);
     setSelectedListId(null);
@@ -730,6 +778,7 @@ export function TodoApp({
   }
 
   function selectLabel(labelId: string) {
+    leaveCalendarRoute();
     setActiveView(null);
     setSelectedListId(null);
     setSelectedLabelId(labelId);
@@ -739,6 +788,7 @@ export function TodoApp({
   }
 
   function selectCompletedTask(taskId: string, listId: string) {
+    leaveCalendarRoute();
     setActiveView(null);
     setSelectedLabelId(null);
     setSelectedListId(listId);
@@ -837,6 +887,47 @@ export function TodoApp({
     if (activeView === "today") {
       setSelectedTaskId(task.id);
     }
+  }
+
+  async function addCalendarTask(payload: {
+    name: string;
+    dueDate: string;
+    details: string;
+    listId: string;
+  }) {
+    const { name, dueDate, details, listId } = payload;
+    if (!name.trim() || !listId) return;
+
+    const task = await createTask(listId, name.trim(), dueDate);
+    const detailsHtml = plainTextToTaskDetails(details);
+
+    if (detailsHtml) {
+      await updateTaskDetailsInDb(task.id, detailsHtml);
+    }
+
+    const newTask: Task = {
+      id: task.id,
+      name: task.name,
+      completed: task.completed,
+      details: detailsHtml,
+      hasDetails: taskDetailsHasContent(detailsHtml),
+      dueDate: task.dueDate ? new Date(task.dueDate).toISOString() : null,
+      dueTimeMinutes: null,
+      dueDurationMinutes: null,
+      dueTimeZone: "floating",
+      priority: null,
+      pinned: false,
+      important: false,
+      parentId: null,
+      labels: [],
+    };
+
+    setTasksByList((current) => ({
+      ...current,
+      [listId]: [newTask, ...(current[listId] ?? [])],
+    }));
+
+    setSelectedTaskId(task.id);
   }
 
   async function toggleTask(taskId: string) {
@@ -1384,6 +1475,7 @@ export function TodoApp({
           lists={lists}
           labels={visibleLabels}
           taskCountByListId={taskCountByListId}
+          taskCountByLabelId={taskCountByLabelId}
           completedTasks={completedTasks}
           searchTasks={searchTasks}
           selectedListId={selectedListId}
@@ -1422,6 +1514,8 @@ export function TodoApp({
             onToggleTaskLabel={toggleTaskLabel}
             onLabelsChanged={refreshLabels}
             onMoveTaskToList={moveTaskToList}
+            onAddCalendarTask={addCalendarTask}
+            defaultListId={lists[0]?.id ?? null}
           />
         ) : showRightPanel ? (
           <div
@@ -1474,11 +1568,15 @@ export function TodoApp({
                 >
                   <CalendarMonthView
                     tasks={taskListItems}
+                    lists={lists}
                     selectedTaskId={selectedTaskId}
                     onSelectTask={setSelectedTaskId}
                     onToggleTask={toggleTask}
                     onSetTaskDueDate={setTaskDueDate}
                     onSetTaskDueTime={setTaskDueTime}
+                    onMoveTaskToList={moveTaskToList}
+                    onAddCalendarTask={addCalendarTask}
+                    defaultListId={selectedListId}
                   />
                 </div>
               )}

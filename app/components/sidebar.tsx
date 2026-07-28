@@ -14,7 +14,6 @@ import {
   getListRowElements,
   reorderListIds,
 } from "./list-reorder";
-import { getLabelDotColor } from "./task-label-pills";
 import { ConfirmModal } from "./confirm-modal";
 import { MacCmdIcon } from "./mac-cmd-icon";
 import { RenameListModal } from "./rename-list-modal";
@@ -39,6 +38,7 @@ type SidebarProps = {
   lists: TodoList[];
   labels: TaskLabel[];
   taskCountByListId: Record<string, number>;
+  taskCountByLabelId: Record<string, number>;
   completedTasks: CompletedTask[];
   searchTasks: SearchTask[];
   selectedListId: string | null;
@@ -94,6 +94,7 @@ export function Sidebar({
   lists,
   labels,
   taskCountByListId,
+  taskCountByLabelId,
   completedTasks,
   searchTasks,
   selectedListId,
@@ -504,7 +505,7 @@ export function Sidebar({
               data-list-id={list.id}
               onPointerDown={(event) => handleListPointerDown(event, list.id)}
               onClick={() => handleListClick(list.id)}
-              className={`group relative flex h-[35px] items-center touch-none rounded-[3px] cursor-pointer ${
+              className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[7px] ${
                 !isTodaySelected &&
                 // !isNext7DaysSelected &&
                 !isImportantSelected &&
@@ -595,11 +596,15 @@ export function Sidebar({
 
           <button
             type="button"
-            className={`${getItemClassName(false)} gap-4 px-4 group hover:text-zinc-900`}
+            className={`${getItemClassName(false)} gap-2 pr-4 pl-[20px] ml-2 mr-2 w-[235px]! group hover:text-zinc-900 hover:bg-zinc-200! rounded-[7px]`}
             onClick={() => setIsAddListOpen(true)}
           >
-            New list
-            <LuPlus className="size-3.5 text-[#d0d5dc] group-hover:text-zinc-600 shrink-0" aria-hidden="true" />
+            <div className="pl-2 pr-3 py-1 rounded-lg flex items-center gap-1 duration-200">
+            {/* <div className="hover:bg-[#e1ddda] pl-2 pr-3 py-1 rounded-lg flex items-center gap-1 duration-200"> */}
+              <LuPlus className="size-3.5 text-gray-500 group-hover:text-zinc-600 shrink-0" aria-hidden="true" />
+              {/* <LuPlus className="size-3.5 text-[#d0d5dc] group-hover:text-zinc-600 shrink-0" aria-hidden="true" /> */}
+              <div className="text-gray-500 group-hover:text-gray-800 ">Create list</div>
+            </div>
           </button>
 
           {labels.length > 0 ? (
@@ -612,18 +617,16 @@ export function Sidebar({
                   key={item.id}
                   type="button"
                   onClick={() => onSelectLabel(item.id)}
-                  className={`${getItemClassName(selectedLabelId === item.id)} mx-2 gap-2 rounded-lg px-2`}
+                  className={`${getItemClassName(selectedLabelId === item.id)} mr-2 gap-2 px-2`}
                 >
                   <IoPricetagsOutline
                     className="size-4 shrink-0 text-zinc-700 dark:text-zinc-300"
                     aria-hidden="true"
                   />
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  <span
-                    className="size-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: getLabelDotColor(item.id) }}
-                    aria-hidden="true"
-                  />
+                  <span className="shrink-0 text-xs tabular-nums text-zinc-400 dark:text-zinc-500 mr-[11px]!">
+                    {taskCountByLabelId[item.id] ?? 0}
+                  </span>
                 </button>
               ))}
             </div>

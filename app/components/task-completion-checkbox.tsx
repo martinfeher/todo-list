@@ -22,7 +22,7 @@ function CheckmarkOutlineIcon({
       {...props}
     >
       <path d={CHECKMARK_OUTLINE_CIRCLE_PATH} fillRule="evenodd" />
-      <path className="opacity-70" d={CHECKMARK_OUTLINE_CHECK_PATH} />
+      <path className="opacity-60" d={CHECKMARK_OUTLINE_CHECK_PATH} />
     </svg>
   );
 }

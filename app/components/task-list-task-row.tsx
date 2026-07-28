@@ -203,7 +203,7 @@ export function TaskListTaskRow({
           ? (event) => onTaskDragStart(event, task.id)
           : undefined
       }
-      className={`group flex min-h-[35px] items-center rounded-[3px] border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 cursor-pointer ${
+      className={`group flex min-h-[35px] items-center rounded-r-[3px] border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 cursor-pointer ${
         showDragHandle ? "touch-none" : ""
       } ${
         isSelected
