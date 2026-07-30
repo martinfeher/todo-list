@@ -128,6 +128,7 @@ export function Sidebar({
   const [isAddListOpen, setIsAddListOpen] = useState(false);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [listNameDraft, setListNameDraft] = useState("");
+  const [hoveredListId, setHoveredListId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
   const listNameInputRef = useRef<HTMLInputElement>(null);
@@ -184,6 +185,35 @@ export function Sidebar({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
+
+  function isListSelected(listId: string) {
+    return (
+      !isTodaySelected &&
+      !isImportantSelected &&
+      !isCalendarSelected &&
+      !selectedLabelId &&
+      listId === selectedListId
+    );
+  }
+
+  function getListRowClassName(listId: string) {
+    const isSelected = isListSelected(listId);
+    const isHovered = hoveredListId === listId;
+
+    if (isHovered) {
+      return "bg-[#e9ebee]/70 dark:bg-zinc-800/60";
+    }
+
+    if (isSelected) {
+      if (hoveredListId !== null && hoveredListId !== listId) {
+        return "bg-[#e9ebee]/50 dark:bg-zinc-800";
+      }
+
+      return "bg-[#e9ebee]/50 dark:bg-zinc-800";
+    }
+
+    return "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60";
+  }
 
   function openRenameModal(list: TodoList) {
     setOpenMenuListId(null);
@@ -437,7 +467,7 @@ export function Sidebar({
               }
               className={
                 item.action === "search"
-                  ? "ml-2 mr-[6px] mt-3 mb-1 flex h-[35px] w-auto cursor-pointer items-center gap-2 self-stretch rounded-full border border-[#eae8f0] py-0 pl-3 pr-[3px] text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800/60"
+                  ? "ml-2 mr-[6px] my-2 flex h-[35px] w-auto cursor-pointer items-center gap-2 self-stretch rounded-full border border-[#eae8f0] py-0 pl-3 pr-[3px] text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800/60"
              
                   : `${getItemClassName(isNavItemSelected)} gap-2 px-4`
               }
@@ -492,7 +522,11 @@ export function Sidebar({
           
           <hr className="my-2 border-zinc-200 dark:border-zinc-800" />
           <div className="flex flex-col gap-2 px-4 pb-1 text-xs font-medium text-zinc-400 dark:text-zinc-500">Lists</div>
-          <div ref={listContainerRef} className="relative flex flex-col">
+          <div
+            ref={listContainerRef}
+            className="relative flex flex-col"
+            onMouseLeave={() => setHoveredListId(null)}
+          >
             {dropIndicatorTop !== null && (
               <div
                 className="pointer-events-none absolute right-2 left-2 z-20 h-0.5 bg-blue-500"
@@ -505,16 +539,8 @@ export function Sidebar({
               data-list-id={list.id}
               onPointerDown={(event) => handleListPointerDown(event, list.id)}
               onClick={() => handleListClick(list.id)}
-              className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[7px] ${
-                !isTodaySelected &&
-                // !isNext7DaysSelected &&
-                !isImportantSelected &&
-                !isCalendarSelected &&
-                !selectedLabelId &&
-                list.id === selectedListId
-                  ? "bg-[#e9ebee]/95 dark:bg-zinc-800"
-                  : "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60"
-              }`}
+              onMouseEnter={() => setHoveredListId(list.id)}
+              className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[7px] ${getListRowClassName(list.id)}`}
             >
               <div className="flex min-w-0 flex-1 items-center gap-2 px-4 text-left text-sm text-zinc-800 dark:text-zinc-50">
                 {editingListId === list.id ? (
@@ -617,7 +643,7 @@ export function Sidebar({
                   key={item.id}
                   type="button"
                   onClick={() => onSelectLabel(item.id)}
-                  className={`${getItemClassName(selectedLabelId === item.id)} mr-2 gap-2 px-2`}
+                  className={`${getItemClassName(selectedLabelId === item.id)} mr-2 gap-2 pl-6 pr-2`}
                 >
                   <IoPricetagsOutline
                     className="size-4 shrink-0 text-zinc-700 dark:text-zinc-300"

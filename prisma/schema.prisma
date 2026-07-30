@@ -62,3 +62,9 @@ model TaskTag {
 
   @@id([taskId, tagId])
 }
+
+model AppSetting {
+  key       String   @id
+  value     String   @default("")
+  updatedAt DateTime @updatedAt
+}

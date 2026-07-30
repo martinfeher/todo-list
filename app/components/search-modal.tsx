@@ -3,7 +3,6 @@
 import {
   useDeferredValue,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -12,6 +11,10 @@ import {
 import { BiSearch } from "react-icons/bi";
 import { fetchTaskById } from "@/lib/task-details-api";
 import { taskDetailsHasContent } from "@/lib/task-details-content";
+import {
+  fetchLastSearchQuery,
+  saveLastSearchQuery,
+} from "@/lib/search-settings-api";
 import { TaskCompletionCheckbox } from "./task-completion-checkbox";
 import type { SearchTask } from "./todo-app";
 
@@ -24,6 +27,7 @@ type SearchModalProps = {
 };
 
 const SEARCH_RESULT_LIMIT = 50;
+const SEARCH_QUERY_SAVE_MS = 400;
 const detailsCache = new Map<string, string>();
 
 type SearchScope = "all" | "names" | "content";
@@ -48,9 +52,17 @@ function detailsToPlainText(details: string): string {
   return (container.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+function getEffectiveDetails(task: SearchTask): string {
+  if (taskDetailsHasContent(task.details)) {
+    return task.details;
+  }
+
+  return detailsCache.get(task.id) ?? "";
+}
+
 function buildSearchIndex(tasks: SearchTask[]) {
   return tasks.map((task) => {
-    const plainDetails = detailsToPlainText(task.details);
+    const plainDetails = detailsToPlainText(getEffectiveDetails(task));
 
     return {
       ...task,
@@ -83,16 +95,20 @@ function filterTasks(
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) return [];
 
-  const matches: IndexedSearchTask[] = [];
+  const openMatches: IndexedSearchTask[] = [];
+  const completedMatches: IndexedSearchTask[] = [];
 
   for (const task of index) {
-    if (taskMatchesScope(task, trimmed, scope)) {
-      matches.push(task);
-      if (matches.length >= SEARCH_RESULT_LIMIT) break;
+    if (!taskMatchesScope(task, trimmed, scope)) continue;
+
+    if (task.completed) {
+      completedMatches.push(task);
+    } else {
+      openMatches.push(task);
     }
   }
 
-  return matches;
+  return [...openMatches, ...completedMatches].slice(0, SEARCH_RESULT_LIMIT);
 }
 
 function highlightSearchMatch(text: string, query: string): ReactNode {
@@ -127,113 +143,119 @@ function highlightSearchMatch(text: string, query: string): ReactNode {
   return parts;
 }
 
-type SearchResultContentPreviewProps = {
-  taskId: string;
-  details: string;
-  hasDetails: boolean;
+type SearchTaskPreviewPanelProps = {
+  task: SearchTask | null;
 };
 
-function SearchResultContentPreview({
-  taskId,
-  details,
-  hasDetails,
-}: SearchResultContentPreviewProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
+function SearchTaskPreviewPanel({ task }: SearchTaskPreviewPanelProps) {
+  const taskId = task?.id ?? null;
+  const details = task?.details ?? "";
+  const hasDetails = task?.hasDetails ?? false;
 
   const hasLoadedDetails = taskDetailsHasContent(details);
   const [fetchedDetails, setFetchedDetails] = useState<string | null>(() => {
-    if (hasLoadedDetails) return null;
+    if (!taskId || hasLoadedDetails) return null;
     return detailsCache.get(taskId) ?? null;
   });
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (!hasDetails || hasLoadedDetails || fetchedDetails !== null) return;
+    if (!taskId) {
+      setFetchedDetails(null);
+      setIsLoading(false);
+      return;
+    }
+
+    if (hasLoadedDetails) {
+      setFetchedDetails(null);
+      setIsLoading(false);
+      return;
+    }
+
+    const cached = detailsCache.get(taskId);
+    if (cached !== undefined) {
+      setFetchedDetails(cached);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!hasDetails) {
+      setFetchedDetails("");
+      setIsLoading(false);
+      return;
+    }
 
     let cancelled = false;
+    setIsLoading(true);
 
     fetchTaskById(taskId)
-      .then((task) => {
+      .then((loadedTask) => {
         if (cancelled) return;
-        const loaded = task?.details ?? "";
+        const loaded = loadedTask?.details ?? "";
         detailsCache.set(taskId, loaded);
         setFetchedDetails(loaded);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (cancelled) return;
+        detailsCache.set(taskId, "");
+        setFetchedDetails("");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [taskId, hasDetails, hasLoadedDetails, fetchedDetails]);
+  }, [taskId, details, hasDetails, hasLoadedDetails]);
+
+  if (!task) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-sm text-zinc-400 dark:text-zinc-500">
+        Hover a task to preview its content
+      </div>
+    );
+  }
 
   const previewDetails = hasLoadedDetails
     ? details
-    : (fetchedDetails ?? detailsCache.get(taskId) ?? "");
+    : (fetchedDetails ?? detailsCache.get(task.id) ?? "");
   const hasContent = taskDetailsHasContent(previewDetails);
 
-  useLayoutEffect(() => {
-    if (!hasContent) return;
-
-    const container = containerRef.current;
-    const content = contentRef.current;
-    if (!container || !content) return;
-
-    const updateScale = () => {
-      const containerWidth = container.clientWidth;
-      const containerHeight = container.clientHeight;
-      const contentWidth = content.scrollWidth;
-      const contentHeight = content.scrollHeight;
-
-      if (contentWidth <= 0 || contentHeight <= 0) return;
-
-      const nextScale = Math.min(
-        containerWidth / contentWidth,
-        containerHeight / contentHeight,
-        1,
-      );
-
-      setScale(nextScale);
-    };
-
-    updateScale();
-
-    const resizeObserver = new ResizeObserver(updateScale);
-    resizeObserver.observe(container);
-    resizeObserver.observe(content);
-
-    const images = content.querySelectorAll("img");
-    for (const image of images) {
-      if (!image.complete) {
-        image.addEventListener("load", updateScale);
-        image.addEventListener("error", updateScale);
-      }
-    }
-
-    return () => {
-      resizeObserver.disconnect();
-      for (const image of images) {
-        image.removeEventListener("load", updateScale);
-        image.removeEventListener("error", updateScale);
-      }
-    };
-  }, [hasContent, previewDetails]);
-
-  if (!hasDetails && !hasContent) return null;
-  if (!hasContent) return null;
-
   return (
-    <div
-      ref={containerRef}
-      aria-hidden="true"
-      className="relative w-[220px] shrink-0 self-stretch overflow-hidden border-l border-zinc-100 bg-white/70 py-1.5 pl-2 pr-1.5 dark:border-zinc-800 dark:bg-zinc-950/50"
-    >
-      <div
-        ref={contentRef}
-        className="search-result-content-preview task-details-editor absolute left-2 top-1.5 w-[280px] origin-top-left text-[13px] leading-[1.45]"
-        style={{ transform: `scale(${scale})` }}
-        dangerouslySetInnerHTML={{ __html: previewDetails }}
-      />
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+        <h3
+          className={`text-lg font-semibold leading-snug ${
+            task.completed
+              ? "text-zinc-400 line-through dark:text-zinc-500"
+              : "text-zinc-900 dark:text-zinc-50"
+          }`}
+        >
+          {task.name}
+        </h3>
+        <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+          {task.listName}
+        </p>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {isLoading ? (
+          <p className="text-sm text-zinc-400 dark:text-zinc-500">
+            Loading content...
+          </p>
+        ) : hasContent ? (
+          <div
+            className="search-result-content-preview task-details-editor text-sm leading-relaxed text-zinc-700 dark:text-zinc-300"
+            dangerouslySetInnerHTML={{ __html: previewDetails }}
+          />
+        ) : (
+          <p className="text-sm text-zinc-400 dark:text-zinc-500">
+            No content
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -248,14 +270,30 @@ export function SearchModal({
   const [query, setQuery] = useState("");
   const [searchScope, setSearchScope] = useState<SearchScope>("all");
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [detailsVersion, setDetailsVersion] = useState(0);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const deferredQuery = useDeferredValue(query);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const pendingDetailFetchesRef = useRef(new Set<string>());
+  const queryRef = useRef(query);
+  const prevOpenRef = useRef(false);
   const isFiltering = query !== deferredQuery;
+
+  queryRef.current = query;
+
+  function focusSearchInputAtEnd() {
+    const input = inputRef.current;
+    if (!input) return;
+
+    input.focus();
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }
 
   const searchIndex = useMemo(
     () => (open ? buildSearchIndex(tasks) : []),
-    [open, tasks],
+    [open, tasks, detailsVersion],
   );
 
   const results = useMemo(
@@ -276,16 +314,105 @@ export function SearchModal({
 
   useEffect(() => {
     if (!open) {
-      setQuery("");
       setSearchScope("all");
       setActiveIndex(-1);
+      setDetailsVersion(0);
+      setIsLoadingDetails(false);
       return;
     }
 
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-    });
+    let cancelled = false;
+
+    void fetchLastSearchQuery()
+      .then((savedQuery) => {
+        if (cancelled) return;
+        setQuery(savedQuery);
+        requestAnimationFrame(() => {
+          focusSearchInputAtEnd();
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        requestAnimationFrame(() => {
+          focusSearchInputAtEnd();
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const timeout = window.setTimeout(() => {
+      void saveLastSearchQuery(query).catch(() => {});
+    }, SEARCH_QUERY_SAVE_MS);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [open, query]);
+
+  useEffect(() => {
+    if (prevOpenRef.current && !open) {
+      void saveLastSearchQuery(queryRef.current).catch(() => {});
+    }
+
+    prevOpenRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || searchScope === "names") {
+      setIsLoadingDetails(false);
+      return;
+    }
+
+    const tasksNeedingDetails = tasks.filter(
+      (task) =>
+        task.hasDetails &&
+        !taskDetailsHasContent(getEffectiveDetails(task)) &&
+        !pendingDetailFetchesRef.current.has(task.id),
+    );
+
+    if (tasksNeedingDetails.length === 0) {
+      setIsLoadingDetails(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingDetails(true);
+
+    for (const task of tasksNeedingDetails) {
+      pendingDetailFetchesRef.current.add(task.id);
+    }
+
+    void Promise.all(
+      tasksNeedingDetails.map((task) =>
+        fetchTaskById(task.id)
+          .then((fetched) => {
+            if (cancelled) return;
+            detailsCache.set(task.id, fetched?.details ?? "");
+            setDetailsVersion((current) => current + 1);
+          })
+          .catch(() => {
+            detailsCache.set(task.id, "");
+          })
+          .finally(() => {
+            pendingDetailFetchesRef.current.delete(task.id);
+          }),
+      ),
+    ).finally(() => {
+      if (!cancelled) {
+        setIsLoadingDetails(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, searchScope, tasks]);
 
   useEffect(() => {
     if (!open) return;
@@ -305,6 +432,13 @@ export function SearchModal({
   function selectTask(task: SearchTask) {
     onSelectTask(task.id, task.listId);
     onClose();
+  }
+
+  function handleSearchScopeChange(scope: SearchScope) {
+    setSearchScope(scope);
+    requestAnimationFrame(() => {
+      focusSearchInputAtEnd();
+    });
   }
 
   function handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -334,18 +468,18 @@ export function SearchModal({
       }
     }
   }
-
   if (!open) return null;
 
   const trimmedQuery = query.trim();
   const highlightQuery = deferredQuery.trim();
+  const previewTask = activeIndex >= 0 ? (results[activeIndex] ?? null) : null;
+  const showSplitLayout = trimmedQuery.length > 0 && results.length > 0;
   const emptyStateMessage =
     searchScope === "names"
       ? "Start typing to search task names"
       : searchScope === "content"
         ? "Start typing to search task content"
         : "Start typing to search task names and content";
-   
 
   return (
     <div
@@ -360,7 +494,7 @@ export function SearchModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="search-modal-title"
-        className="flex max-h-[min(70vh,520px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-zinc-900"
+        className="flex max-h-[min(75vh,600px)] w-full min-h-[640px] max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-zinc-900"
       >
         <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <h2 id="search-modal-title" className="sr-only">
@@ -389,7 +523,7 @@ export function SearchModal({
                 type="button"
                 role="tab"
                 aria-selected={searchScope === tab.id}
-                onClick={() => setSearchScope(tab.id)}
+                onClick={() => handleSearchScopeChange(tab.id)}
                 className={`rounded-full px-[13px] py-[5px] text-xs font-medium transition-colors cursor-pointer ${
                   searchScope === tab.id
                     ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
@@ -403,9 +537,9 @@ export function SearchModal({
         </div>
 
         <div
-          className={`min-h-0 flex-1 overflow-y-auto transition-opacity ${
+          className={`min-h-0 flex-1 transition-opacity ${
             isFiltering ? "opacity-70" : "opacity-100"
-          }`}
+          } ${showSplitLayout ? "flex" : "overflow-y-auto"}`}
         >
           {!trimmedQuery ? (
             <p className="px-4 py-6 text-sm text-zinc-500 dark:text-zinc-400">
@@ -413,71 +547,78 @@ export function SearchModal({
             </p>
           ) : results.length === 0 ? (
             <p className="px-4 py-6 text-sm text-zinc-500 dark:text-zinc-400">
-              No tasks found
+              {isLoadingDetails &&
+              (searchScope === "content" || searchScope === "all")
+                ? "Searching task content..."
+                : "No tasks found"}
             </p>
           ) : (
             <>
-              <ul role="listbox" aria-activedescendant={activeIndex >= 0 ? `search-result-${results[activeIndex]?.id}` : undefined}>
-                {results.map((task, index) => {
-                  const showContentPreview =
-                    task.hasDetails || taskDetailsHasContent(task.details);
-
-                  return (
-                  <li
-                    key={task.id}
-                    id={`search-result-${task.id}`}
-                    ref={(element) => {
-                      resultRefs.current[index] = element;
-                    }}
-                    role="option"
-                    aria-selected={index === activeIndex}
-                    className={`flex min-h-[44px] items-stretch gap-3 border-b border-zinc-100 px-4 dark:border-zinc-800 cursor-pointer ${
-                      index === activeIndex
-                        ? "bg-zinc-100 dark:bg-zinc-800"
-                        : ""
-                    }`}
+              <div className="flex min-h-0 min-w-0 flex-1">
+                <div className="flex min-h-0 w-[42%] shrink-0 flex-col overflow-y-auto border-r border-zinc-200 dark:border-zinc-800">
+                  <ul
+                    role="listbox"
+                    aria-activedescendant={
+                      activeIndex >= 0
+                        ? `search-result-${results[activeIndex]?.id}`
+                        : undefined
+                    }
                   >
-                    <TaskCompletionCheckbox
-                      checked={task.completed}
-                      onChange={() => onToggleTask(task.id)}
-                      onClick={(event) => event.stopPropagation()}
-                      className="my-auto"
-                      aria-label={`Mark ${task.name} complete`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => selectTask(task)}
-                      className="min-w-0 flex-1 py-2 text-left max-w-[183px]"
-                    >
-                      <span
-                        className={`block truncate text-sm ${
-                          task.completed
-                            ? "text-zinc-400 line-through dark:text-zinc-500"
-                            : "text-zinc-900 dark:text-zinc-50"
+                    {results.map((task, index) => (
+                      <li
+                        key={task.id}
+                        id={`search-result-${task.id}`}
+                        ref={(element) => {
+                          resultRefs.current[index] = element;
+                        }}
+                        role="option"
+                        aria-selected={index === activeIndex}
+                        onMouseEnter={() => setActiveIndex(index)}
+                        className={`flex min-h-11 cursor-pointer items-center gap-3 border-b border-zinc-100 px-4 dark:border-zinc-800 ${
+                          index === activeIndex
+                            ? "bg-zinc-100 dark:bg-zinc-800"
+                            : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                         }`}
                       >
-                        {highlightSearchMatch(task.name, highlightQuery)}
-                      </span>
-                      <span className="block truncate text-xs text-zinc-400 dark:text-zinc-500">
-                        {task.listName}
-                      </span>
-                    </button>
-                    {showContentPreview ? (
-                      <SearchResultContentPreview
-                        taskId={task.id}
-                        details={task.details}
-                        hasDetails={task.hasDetails}
-                      />
-                    ) : null}
-                  </li>
-                  );
-                })}
-              </ul>
-              {results.length >= SEARCH_RESULT_LIMIT && (
-                <p className="px-4 py-3 text-xs text-zinc-400 dark:text-zinc-500">
-                  Showing first {SEARCH_RESULT_LIMIT} matches
-                </p>
-              )}
+                        <TaskCompletionCheckbox
+                          checked={task.completed}
+                          onChange={() => onToggleTask(task.id)}
+                          onClick={(event) => event.stopPropagation()}
+                          className="shrink-0"
+                          aria-label={`Mark ${task.name} complete`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => selectTask(task)}
+                          className="min-w-0 flex-1 py-2.5 text-left"
+                        >
+                          <span
+                            className={`block truncate text-sm ${
+                              task.completed
+                                ? "text-zinc-400 line-through dark:text-zinc-500"
+                                : "text-zinc-900 dark:text-zinc-50"
+                            }`}
+                          >
+                            {highlightSearchMatch(task.name, highlightQuery)}
+                          </span>
+                          <span className="block truncate text-xs text-zinc-400 dark:text-zinc-500">
+                            {task.listName}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  {results.length >= SEARCH_RESULT_LIMIT && (
+                    <p className="px-4 py-3 text-xs text-zinc-400 dark:text-zinc-500">
+                      Showing first {SEARCH_RESULT_LIMIT} matches
+                    </p>
+                  )}
+                </div>
+
+                <div className="min-h-0 min-w-0 flex-1 bg-zinc-50/60 dark:bg-zinc-950/40">
+                  <SearchTaskPreviewPanel task={previewTask} />
+                </div>
+              </div>
             </>
           )}
         </div>
