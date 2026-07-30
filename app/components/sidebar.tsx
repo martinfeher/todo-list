@@ -8,7 +8,8 @@ import { LuPlus, LuStar } from "react-icons/lu";
 // import { BsCalendar2 } from "react-icons/bs";
 import { BsCalendar3 } from "react-icons/bs";
 
-import type { CompletedTask, SearchTask, TaskLabel, TodoList } from "./todo-app";
+import type { CompletedTask, SearchTask, TaskLabel, TaskListItem, TodoList } from "./todo-app";
+import { CalendarMenuPreview } from "./calendar-menu-preview";
 import {
   getListDropIndex,
   getListRowElements,
@@ -41,6 +42,7 @@ type SidebarProps = {
   taskCountByLabelId: Record<string, number>;
   completedTasks: CompletedTask[];
   searchTasks: SearchTask[];
+  calendarTasks: TaskListItem[];
   selectedListId: string | null;
   selectedLabelId: string | null;
   isTodaySelected: boolean;
@@ -61,6 +63,8 @@ type SidebarProps = {
   onRenameList: (listId: string, name: string) => void;
   onRemoveList: (listId: string) => void;
   onReorderLists?: (listIds: string[]) => void;
+  onListHoverStart?: (listId: string) => void;
+  onListHoverEnd?: () => void;
 };
 
 const LIST_DRAG_THRESHOLD_PX = 5;
@@ -97,6 +101,7 @@ export function Sidebar({
   taskCountByLabelId,
   completedTasks,
   searchTasks,
+  calendarTasks,
   selectedListId,
   selectedLabelId,
   isTodaySelected,
@@ -117,6 +122,8 @@ export function Sidebar({
   onRenameList,
   onRemoveList,
   onReorderLists,
+  onListHoverStart,
+  onListHoverEnd,
 }: SidebarProps) {
   const [orderedLists, setOrderedLists] = useState(lists);
   const [dropIndicatorTop, setDropIndicatorTop] = useState<number | null>(null);
@@ -129,6 +136,13 @@ export function Sidebar({
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [listNameDraft, setListNameDraft] = useState("");
   const [hoveredListId, setHoveredListId] = useState<string | null>(null);
+  const [isCalendarPreviewOpen, setIsCalendarPreviewOpen] = useState(false);
+  const [calendarPreviewPosition, setCalendarPreviewPosition] = useState({
+    top: 0,
+    left: 0,
+  });
+  const calendarNavRef = useRef<HTMLDivElement>(null);
+  const calendarPreviewCloseTimerRef = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
   const listNameInputRef = useRef<HTMLInputElement>(null);
@@ -214,6 +228,55 @@ export function Sidebar({
 
     return "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60";
   }
+
+  function cancelCalendarPreviewClose() {
+    if (calendarPreviewCloseTimerRef.current !== null) {
+      window.clearTimeout(calendarPreviewCloseTimerRef.current);
+      calendarPreviewCloseTimerRef.current = null;
+    }
+  }
+
+  function openCalendarPreview() {
+    cancelCalendarPreviewClose();
+    const nav = calendarNavRef.current;
+    const rect = nav?.getBoundingClientRect();
+    if (!rect) {
+      setIsCalendarPreviewOpen(true);
+      return;
+    }
+
+    const previewWidth = 300;
+    const previewHeight = 300;
+    const gap = 8;
+    const margin = 12;
+    const asideRect = nav?.closest("aside")?.getBoundingClientRect();
+
+    let left = rect.left - previewWidth - gap;
+    if (left < margin) {
+      left = (asideRect?.right ?? rect.right) + gap;
+    }
+    left = Math.min(left, window.innerWidth - previewWidth - margin);
+    left = Math.max(margin, left);
+
+    let top = rect.top;
+    top = Math.max(margin, Math.min(top, window.innerHeight - previewHeight - margin));
+
+    setCalendarPreviewPosition({ top, left });
+    setIsCalendarPreviewOpen(true);
+  }
+
+  function scheduleCalendarPreviewClose() {
+    cancelCalendarPreviewClose();
+    calendarPreviewCloseTimerRef.current = window.setTimeout(() => {
+      setIsCalendarPreviewOpen(false);
+    }, 150);
+  }
+
+  useEffect(() => {
+    return () => {
+      cancelCalendarPreviewClose();
+    };
+  }, []);
 
   function openRenameModal(list: TodoList) {
     setOpenMenuListId(null);
@@ -449,6 +512,26 @@ export function Sidebar({
               : "text-[#7c92a0]";
 
             return (
+            item.action === "calendar" ? (
+              <div
+                key={item.label}
+                ref={calendarNavRef}
+                onMouseEnter={openCalendarPreview}
+                onMouseLeave={scheduleCalendarPreviewClose}
+              >
+                <button
+                  type="button"
+                  onClick={onSelectCalendar}
+                  className={`${getItemClassName(isNavItemSelected)} gap-2 px-4`}
+                >
+                  <BsCalendar3
+                    className={`size-[15px] shrink-0 ${navIconColor}`}
+                    aria-hidden="true"
+                  />
+                  {item.label}
+                </button>
+              </div>
+            ) : (
             <button
               key={item.label}
               type="button"
@@ -459,11 +542,9 @@ export function Sidebar({
                   //   ? onSelectNext7Days
                   : item.action === "important"
                     ? onSelectImportant
-                    : item.action === "calendar"
-                      ? onSelectCalendar
-                      : item.action === "search"
-                        ? () => setIsSearchOpen(true)
-                        : undefined
+                    : item.action === "search"
+                      ? () => setIsSearchOpen(true)
+                      : undefined
               }
               className={
                 item.action === "search"
@@ -480,24 +561,11 @@ export function Sidebar({
               ) : null}
               {item.action === "today" ? (
                 <TodayCalendarIcon
-                  // className={`size-[21px] -ml-[3px] shrink-0 text-[#7c92a0]`}
                   className={`size-[20px] -ml-[2px] shrink-0 ${navIconColor}`}
                 />
               ) : null}
-              {/* {item.action === "next7days" ? (
-                <BsCalendar2
-                  className={`size-[15px] shrink-0 ${navIconColor}`}
-                  aria-hidden="true"
-                />
-              ) : null} */}
               {item.action === "important" ? (
                 <LuStar
-                  className={`size-[15px] shrink-0 ${navIconColor}`}
-                  aria-hidden="true"
-                />
-              ) : null}
-              {item.action === "calendar" ? (
-                <BsCalendar3
                   className={`size-[15px] shrink-0 ${navIconColor}`}
                   aria-hidden="true"
                 />
@@ -517,6 +585,7 @@ export function Sidebar({
                 </div>
               ) : null}
             </button>
+            )
             );
           })}
           
@@ -525,7 +594,10 @@ export function Sidebar({
           <div
             ref={listContainerRef}
             className="relative flex flex-col"
-            onMouseLeave={() => setHoveredListId(null)}
+            onMouseLeave={() => {
+              setHoveredListId(null);
+              onListHoverEnd?.();
+            }}
           >
             {dropIndicatorTop !== null && (
               <div
@@ -539,7 +611,10 @@ export function Sidebar({
               data-list-id={list.id}
               onPointerDown={(event) => handleListPointerDown(event, list.id)}
               onClick={() => handleListClick(list.id)}
-              onMouseEnter={() => setHoveredListId(list.id)}
+              onMouseEnter={() => {
+                setHoveredListId(list.id);
+                onListHoverStart?.(list.id);
+              }}
               className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[7px] ${getListRowClassName(list.id)}`}
             >
               <div className="flex min-w-0 flex-1 items-center gap-2 px-4 text-left text-sm text-zinc-800 dark:text-zinc-50">
@@ -705,6 +780,16 @@ export function Sidebar({
         onSelectTask={onSelectSearchTask}
         onToggleTask={onToggleTask}
       />
+
+      {isCalendarPreviewOpen ? (
+        <CalendarMenuPreview
+          tasks={calendarTasks}
+          top={calendarPreviewPosition.top}
+          left={calendarPreviewPosition.left}
+          onMouseEnter={openCalendarPreview}
+          onMouseLeave={scheduleCalendarPreviewClose}
+        />
+      ) : null}
 
       <RenameListModal
         open={isAddListOpen}

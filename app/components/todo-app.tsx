@@ -343,6 +343,7 @@ export function TodoApp({
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
+  const [hoveredListId, setHoveredListId] = useState<string | null>(null);
   const [focusNoteAtEndRequest, setFocusNoteAtEndRequest] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>(initialActiveView);
   const [tasksByList, setTasksByList] = useState(() =>
@@ -432,6 +433,21 @@ export function TodoApp({
   const isHoverPreview =
     hoveredTaskId !== null && hoveredTaskId !== selectedTaskId;
 
+  const previewListId = activeView === "calendar" ? null : hoveredListId;
+  const previewList =
+    previewListId !== null
+      ? (lists.find((list) => list.id === previewListId) ?? null)
+      : null;
+  const displayedListId = previewListId ?? selectedListId;
+  const displayedActiveView = previewListId ? null : activeView;
+  const displayedLabelId = previewListId ? null : selectedLabelId;
+  const isListHoverPreview = Boolean(
+    previewListId &&
+      (previewListId !== selectedListId ||
+        activeView !== null ||
+        selectedLabelId !== null),
+  );
+
   const selectedList = lists.find((list) => list.id === selectedListId) ?? null;
   const selectedLabel =
     labels.find((item) => item.id === selectedLabelId) ?? null;
@@ -445,22 +461,24 @@ export function TodoApp({
   );
 
   const taskListTitle =
-    selectedLabel
-      ? selectedLabel.label
-      : activeView === "today"
-        ? "Today"
-        // : activeView === "next7days"
-        //   ? "Next 7 days"
-        : activeView === "important"
-          ? "Important"
-          : activeView === "calendar"
-            ? "Calendar"
-            : (selectedList?.name ?? null);
+    previewList
+      ? previewList.name
+      : selectedLabel
+        ? selectedLabel.label
+        : activeView === "today"
+          ? "Today"
+          // : activeView === "next7days"
+          //   ? "Next 7 days"
+          : activeView === "important"
+            ? "Important"
+            : activeView === "calendar"
+              ? "Calendar"
+              : (selectedList?.name ?? null);
 
   const taskListItems: TaskListItem[] = getVisibleTasks(
-    activeView,
-    selectedListId,
-    selectedLabelId,
+    displayedActiveView,
+    displayedListId,
+    displayedLabelId,
     lists,
     tasksByList,
   );
@@ -857,10 +875,13 @@ export function TodoApp({
     if (!name.trim()) return;
 
     const targetListId =
-      selectedListId ?? (activeView === "today" ? (lists[0]?.id ?? null) : null);
+      previewListId ??
+      selectedListId ??
+      (activeView === "today" ? (lists[0]?.id ?? null) : null);
     if (!targetListId) return;
 
-    const dueDateValue = activeView === "today" ? getTodayDateValue() : null;
+    const dueDateValue =
+      previewListId || activeView !== "today" ? null : getTodayDateValue();
     const task = await createTask(targetListId, name.trim(), dueDateValue);
     const newTask: Task = {
       id: task.id,
@@ -1441,6 +1462,10 @@ export function TodoApp({
   }, [selectedLabelId, activeView]);
 
   useEffect(() => {
+    setHoveredListId(null);
+  }, [selectedListId, selectedLabelId, activeView]);
+
+  useEffect(() => {
     return () => {
       cancelListCalendarClose();
     };
@@ -1478,6 +1503,7 @@ export function TodoApp({
           taskCountByLabelId={taskCountByLabelId}
           completedTasks={completedTasks}
           searchTasks={searchTasks}
+          calendarTasks={calendarTasks}
           selectedListId={selectedListId}
           selectedLabelId={selectedLabelId}
           isTodaySelected={activeView === "today"}
@@ -1498,6 +1524,8 @@ export function TodoApp({
           onRenameList={renameList}
           onRemoveList={removeList}
           onReorderLists={reorderLists}
+          onListHoverStart={setHoveredListId}
+          onListHoverEnd={() => setHoveredListId(null)}
         />
         {activeView === "calendar" ? (
           <CalendarPanel
@@ -1531,11 +1559,11 @@ export function TodoApp({
               panelWidth={taskListWidth}
               expanded={false}
               showAddTask={
-                selectedListId !== null ||
-                (activeView === "today" && lists.length > 0)
+                displayedListId !== null ||
+                (activeView === "today" && lists.length > 0 && previewListId === null)
               }
-              isLabelFilter={selectedLabelId !== null}
-              listId={selectedListId}
+              isLabelFilter={displayedLabelId !== null}
+              listId={displayedListId}
               onAddTask={addTask}
               onToggleTask={toggleTask}
               onSelectTask={setSelectedTaskId}
@@ -1552,7 +1580,7 @@ export function TodoApp({
               onMoveTaskToList={moveTaskToList}
               onTaskHoverStart={handleTaskHoverStart}
               onTaskHoverEnd={() => setHoveredTaskId(null)}
-              showListCalendarButton={selectedListId !== null}
+              showListCalendarButton={displayedListId !== null}
               listCalendarButtonRef={listCalendarButtonRef}
               onListCalendarHoverStart={openListCalendar}
               onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
@@ -1576,21 +1604,29 @@ export function TodoApp({
                     onSetTaskDueTime={setTaskDueTime}
                     onMoveTaskToList={moveTaskToList}
                     onAddCalendarTask={addCalendarTask}
-                    defaultListId={selectedListId}
+                    defaultListId={displayedListId}
                   />
                 </div>
               )}
               {showTaskDetails && (
-                <TaskDetailsPanel
-                  taskId={displayedTaskId}
-                  isHoverPreview={isHoverPreview}
-                  taskSnapshot={isHoverPreview ? null : selectedTaskSnapshot}
-                  focusNoteAtEndRequest={focusNoteAtEndRequest}
-                  onDetailsSaved={handleDetailsSaved}
-                  onTaskHasDetailsKnown={handleTaskHasDetailsKnown}
-                  onTaskRenamed={handleTaskRenamed}
-                  onDueDateUpdated={handleDueDateUpdated}
-                />
+                <div
+                  className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-[filter,opacity] duration-200 ${
+                    isListHoverPreview
+                      ? "pointer-events-none blur-[2px] opacity-75 saturate-90"
+                      : ""
+                  }`}
+                >
+                  <TaskDetailsPanel
+                    taskId={displayedTaskId}
+                    isHoverPreview={isHoverPreview}
+                    taskSnapshot={isHoverPreview ? null : selectedTaskSnapshot}
+                    focusNoteAtEndRequest={focusNoteAtEndRequest}
+                    onDetailsSaved={handleDetailsSaved}
+                    onTaskHasDetailsKnown={handleTaskHasDetailsKnown}
+                    onTaskRenamed={handleTaskRenamed}
+                    onDueDateUpdated={handleDueDateUpdated}
+                  />
+                </div>
               )}
             </div>
           </div>
@@ -1604,11 +1640,11 @@ export function TodoApp({
               selectedTaskId={selectedTaskId}
               expanded
               showAddTask={
-                selectedListId !== null ||
-                (activeView === "today" && lists.length > 0)
+                displayedListId !== null ||
+                (activeView === "today" && lists.length > 0 && previewListId === null)
               }
-              isLabelFilter={selectedLabelId !== null}
-              listId={selectedListId}
+              isLabelFilter={displayedLabelId !== null}
+              listId={displayedListId}
               onAddTask={addTask}
               onToggleTask={toggleTask}
               onSelectTask={setSelectedTaskId}
@@ -1625,7 +1661,7 @@ export function TodoApp({
               onMoveTaskToList={moveTaskToList}
               onTaskHoverStart={handleTaskHoverStart}
               onTaskHoverEnd={() => setHoveredTaskId(null)}
-              showListCalendarButton={selectedListId !== null}
+              showListCalendarButton={displayedListId !== null}
               listCalendarButtonRef={listCalendarButtonRef}
               onListCalendarHoverStart={openListCalendar}
               onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
