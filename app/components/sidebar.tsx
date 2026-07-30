@@ -74,7 +74,7 @@ function shouldStartListDrag(target: EventTarget | null) {
 }
 
 const itemClassName =
-  "flex w-full items-center text-left text-sm transition-colors cursor-pointer";
+  "flex !ml-1 w-full items-center text-left text-sm transition-colors cursor-pointer";
 
 const completedItemClassName =
   "flex min-h-[44px] w-full flex-col items-start justify-center gap-0 px-4 py-1 text-left text-sm transition-colors";
@@ -467,7 +467,7 @@ export function Sidebar({
               }
               className={
                 item.action === "search"
-                  ? "ml-2 mr-[6px] my-2 flex h-[35px] w-auto cursor-pointer items-center gap-2 self-stretch rounded-full border border-[#eae8f0] py-0 pl-3 pr-[3px] text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800/60"
+                  ? "ml-2 mr-[6px] my-2 flex h-[35px] w-auto cursor-pointer items-center gap-2 self-stretch rounded-full border border-[#e3e3e9] py-0 pl-3 pr-[3px] text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800/60"
              
                   : `${getItemClassName(isNavItemSelected)} gap-2 px-4`
               }
@@ -505,12 +505,12 @@ export function Sidebar({
               {item.label}
               {item.action === "search" ? (
                 <div
-                  className="ml-auto flex size-[28px] shrink-0 items-center justify-center rounded-full bg-[#eceff4]/75 mr-[1px] border border-[#eee8ef]"
+                  className="ml-auto flex h-[25px] w-[37px] shrink-0 items-center justify-center rounded-full bg-[#eceff4]/75 mr-[1px] border border-[#eee8ef]"
                   aria-hidden="true"
                 >
                   <div className="flex items-center gap-px text-[#a1a7be]/50">
                     <MacCmdIcon className="size-[9px] shrink-0" />
-                    <span className="text-[9px] font-bold leading-none text-[#a1a7ae]/65">
+                    <span className="text-[10px] font-bold leading-none text-[#a1a7ae]/65">
                       +K
                     </span>
                   </div>
@@ -622,7 +622,7 @@ export function Sidebar({
 
           <button
             type="button"
-            className={`${getItemClassName(false)} gap-2 pr-4 pl-[20px] ml-2 mr-2 w-[235px]! group hover:text-zinc-900 hover:bg-zinc-200! rounded-[7px]`}
+            className={`${getItemClassName(false)} gap-2 pr-4 pl-[15px] ml-2 mr-2 w-[235px]! group hover:text-zinc-900 hover:bg-zinc-150! rounded-[7px]`}
             onClick={() => setIsAddListOpen(true)}
           >
             <div className="pl-2 pr-3 py-1 rounded-lg flex items-center gap-1 duration-200">
@@ -661,7 +661,7 @@ export function Sidebar({
           <div className="mt-3 flex flex-col border-t border-zinc-150">
             <button
               type="button"
-              className={`${getItemClassName(isCompletedOpen)} px-4`}
+              className={`${getItemClassName(isCompletedOpen)} pl-6 pr-4`}
               onClick={() => setIsCompletedOpen((open) => !open)}
             >
               Completed

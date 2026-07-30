@@ -145,9 +145,10 @@ function highlightSearchMatch(text: string, query: string): ReactNode {
 
 type SearchTaskPreviewPanelProps = {
   task: SearchTask | null;
+  onOpenTask?: (task: SearchTask) => void;
 };
 
-function SearchTaskPreviewPanel({ task }: SearchTaskPreviewPanelProps) {
+function SearchTaskPreviewPanel({ task, onOpenTask }: SearchTaskPreviewPanelProps) {
   const taskId = task?.id ?? null;
   const details = task?.details ?? "";
   const hasDetails = task?.hasDetails ?? false;
@@ -224,9 +225,19 @@ function SearchTaskPreviewPanel({ task }: SearchTaskPreviewPanelProps) {
     : (fetchedDetails ?? detailsCache.get(task.id) ?? "");
   const hasContent = taskDetailsHasContent(previewDetails);
 
+  function handleOpenTask() {
+    if (task && onOpenTask) {
+      onOpenTask(task);
+    }
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+      <button
+        type="button"
+        onClick={handleOpenTask}
+        className="border-b border-zinc-100 px-5 py-4 text-left transition-colors hover:bg-zinc-100/80 dark:border-zinc-800 dark:hover:bg-zinc-800/50 cursor-pointer"
+      >
         <h3
           className={`text-lg font-semibold leading-snug ${
             task.completed
@@ -239,15 +250,19 @@ function SearchTaskPreviewPanel({ task }: SearchTaskPreviewPanelProps) {
         <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
           {task.listName}
         </p>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      </button>
+      <button
+        type="button"
+        onClick={handleOpenTask}
+        className="min-h-0 overflow-y-auto px-5 py-4 text-left transition-colors hover:bg-zinc-100/60 dark:hover:bg-zinc-800/30 cursor-pointer"
+      >
         {isLoading ? (
           <p className="text-sm text-zinc-400 dark:text-zinc-500">
             Loading content...
           </p>
         ) : hasContent ? (
           <div
-            className="search-result-content-preview task-details-editor text-sm leading-relaxed text-zinc-700 dark:text-zinc-300"
+            className="search-result-content-preview task-details-editor pointer-events-none text-sm leading-relaxed text-zinc-700 dark:text-zinc-300"
             dangerouslySetInnerHTML={{ __html: previewDetails }}
           />
         ) : (
@@ -255,7 +270,7 @@ function SearchTaskPreviewPanel({ task }: SearchTaskPreviewPanelProps) {
             No content
           </p>
         )}
-      </div>
+      </button>
     </div>
   );
 }
@@ -282,13 +297,15 @@ export function SearchModal({
 
   queryRef.current = query;
 
-  function focusSearchInputAtEnd() {
+  function focusSearchInputSelectAll() {
     const input = inputRef.current;
     if (!input) return;
 
     input.focus();
-    const end = input.value.length;
-    input.setSelectionRange(end, end);
+    const length = input.value.length;
+    if (length > 0) {
+      input.setSelectionRange(0, length);
+    }
   }
 
   const searchIndex = useMemo(
@@ -328,13 +345,17 @@ export function SearchModal({
         if (cancelled) return;
         setQuery(savedQuery);
         requestAnimationFrame(() => {
-          focusSearchInputAtEnd();
+          requestAnimationFrame(() => {
+            focusSearchInputSelectAll();
+          });
         });
       })
       .catch(() => {
         if (cancelled) return;
         requestAnimationFrame(() => {
-          focusSearchInputAtEnd();
+          requestAnimationFrame(() => {
+            focusSearchInputSelectAll();
+          });
         });
       });
 
@@ -437,7 +458,7 @@ export function SearchModal({
   function handleSearchScopeChange(scope: SearchScope) {
     setSearchScope(scope);
     requestAnimationFrame(() => {
-      focusSearchInputAtEnd();
+      focusSearchInputSelectAll();
     });
   }
 
@@ -616,7 +637,10 @@ export function SearchModal({
                 </div>
 
                 <div className="min-h-0 min-w-0 flex-1 bg-zinc-50/60 dark:bg-zinc-950/40">
-                  <SearchTaskPreviewPanel task={previewTask} />
+                  <SearchTaskPreviewPanel
+                    task={previewTask}
+                    onOpenTask={selectTask}
+                  />
                 </div>
               </div>
             </>
