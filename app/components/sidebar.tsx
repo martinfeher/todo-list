@@ -3,12 +3,19 @@
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { IoIosSearch } from "react-icons/io";
-import { IoPricetagsOutline } from "react-icons/io5";
+import { IoPricetagOutline } from "react-icons/io5";
 import { LuPlus, LuStar } from "react-icons/lu";
-// import { BsCalendar2 } from "react-icons/bs";
+import { PiDotsThreeBold } from "react-icons/pi";
 import { BsCalendar3 } from "react-icons/bs";
 
-import type { CompletedTask, SearchTask, TaskLabel, TaskListItem, TodoList } from "./todo-app";
+import type {
+  CompletedTask,
+  SearchTask,
+  SidebarHoverPreview,
+  TaskLabel,
+  TaskListItem,
+  TodoList,
+} from "./todo-app";
 import { CalendarMenuPreview } from "./calendar-menu-preview";
 import {
   getListDropIndex,
@@ -18,7 +25,6 @@ import {
 import { ConfirmModal } from "./confirm-modal";
 import { MacCmdIcon } from "./mac-cmd-icon";
 import { RenameListModal } from "./rename-list-modal";
-import { ThreeDotsIcon } from "./three-dots-icon";
 import { TodayCalendarIcon } from "./today-calendar-icon";
 
 
@@ -63,9 +69,9 @@ type SidebarProps = {
   onRenameList: (listId: string, name: string) => void;
   onRemoveList: (listId: string) => void;
   onReorderLists?: (listIds: string[]) => void;
-  onListHoverStart?: (listId: string) => void;
-  onListHoverEnd?: () => void;
-  hoveredListId?: string | null;
+  onSidebarHoverStart?: (preview: SidebarHoverPreview) => void;
+  onSidebarHoverEnd?: () => void;
+  sidebarHoverPreview?: SidebarHoverPreview | null;
 };
 
 const LIST_DRAG_THRESHOLD_PX = 5;
@@ -79,10 +85,10 @@ function shouldStartListDrag(target: EventTarget | null) {
 }
 
 const itemClassName =
-  "flex !ml-1 w-full items-center text-left text-sm transition-colors cursor-pointer";
+  "flex mx-[6px] mb-px w-auto items-center rounded-[7px] text-left text-sm transition-colors cursor-pointer";
 
 const completedItemClassName =
-  "flex min-h-[44px] w-full flex-col items-start justify-center gap-0 px-4 py-1 text-left text-sm transition-colors";
+  "flex mx-[4px] mb-px min-h-[44px] w-auto flex-col items-start justify-center gap-0 rounded-[7px] px-4 py-1 text-left text-sm transition-colors";
 
 function getItemClassName(isSelected: boolean, baseClassName = itemClassName) {
   const heightClass =
@@ -123,9 +129,9 @@ export function Sidebar({
   onRenameList,
   onRemoveList,
   onReorderLists,
-  onListHoverStart,
-  onListHoverEnd,
-  hoveredListId = null,
+  onSidebarHoverStart,
+  onSidebarHoverEnd,
+  sidebarHoverPreview = null,
 }: SidebarProps) {
   const [orderedLists, setOrderedLists] = useState(lists);
   const [dropIndicatorTop, setDropIndicatorTop] = useState<number | null>(null);
@@ -213,14 +219,17 @@ export function Sidebar({
 
   function getListRowClassName(listId: string) {
     const isSelected = isListSelected(listId);
-    const isHovered = hoveredListId === listId;
+    const isHovered =
+      sidebarHoverPreview?.kind === "list" &&
+      sidebarHoverPreview.listId === listId;
+    const isAnySidebarHover = sidebarHoverPreview !== null;
 
     if (isHovered) {
-      return "border-r-2 border-[#bbbbbb] bg-[#e9ebee]/70 dark:bg-zinc-800/60";
+      return "border-r-2 border-[#cfcfcf] bg-[#e9ebee]/70 dark:bg-zinc-800/60";
     }
 
     if (isSelected) {
-      if (hoveredListId !== null && hoveredListId !== listId) {
+      if (isAnySidebarHover && !isHovered) {
         return "bg-[#e9ebee]/50 dark:bg-zinc-800";
       }
 
@@ -228,6 +237,30 @@ export function Sidebar({
     }
 
     return "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60";
+  }
+
+  function getNavItemClassName(
+    action: "today" | "important" | "calendar",
+    isSelected: boolean,
+  ) {
+    const isHovered =
+      (action === "today" && sidebarHoverPreview?.kind === "today") ||
+      (action === "important" && sidebarHoverPreview?.kind === "important") ||
+      (action === "calendar" && sidebarHoverPreview?.kind === "calendar");
+    const isAnySidebarHover = sidebarHoverPreview !== null;
+
+    if (isHovered) {
+      return `${itemClassName} h-[35px] bg-[#e9ebee]/70 dark:bg-zinc-800/60`;
+    }
+
+    if (isSelected) {
+      if (isAnySidebarHover) {
+        return `${itemClassName} h-[35px] bg-[#e9ebee]/50 font-medium text-[#111111] dark:bg-zinc-800 dark:text-zinc-50`;
+      }
+      return getItemClassName(true);
+    }
+
+    return getItemClassName(false);
   }
 
   function cancelCalendarPreviewClose() {
@@ -517,16 +550,22 @@ export function Sidebar({
               <div
                 key={item.label}
                 ref={calendarNavRef}
-                onMouseEnter={openCalendarPreview}
-                onMouseLeave={scheduleCalendarPreviewClose}
+                onMouseEnter={() => {
+                  openCalendarPreview();
+                  onSidebarHoverStart?.({ kind: "calendar" });
+                }}
+                onMouseLeave={() => {
+                  scheduleCalendarPreviewClose();
+                  onSidebarHoverEnd?.();
+                }}
               >
                 <button
                   type="button"
                   onClick={onSelectCalendar}
-                  className={`${getItemClassName(isNavItemSelected)} gap-2 px-4`}
+                  className={`${getNavItemClassName("calendar", isNavItemSelected)} !w-[236px] gap-2 px-4`}
                 >
                   <BsCalendar3
-                    className={`size-[15px] shrink-0 ${navIconColor}`}
+                    className={`size-[14px] shrink-0 ${navIconColor}`}
                     aria-hidden="true"
                   />
                   {item.label}
@@ -539,19 +578,32 @@ export function Sidebar({
               onClick={
                 item.action === "today"
                   ? onSelectToday
-                  // : item.action === "next7days"
-                  //   ? onSelectNext7Days
                   : item.action === "important"
                     ? onSelectImportant
                     : item.action === "search"
                       ? () => setIsSearchOpen(true)
                       : undefined
               }
+              onMouseEnter={
+                item.action === "today"
+                  ? () => onSidebarHoverStart?.({ kind: "today" })
+                  : item.action === "important"
+                    ? () => onSidebarHoverStart?.({ kind: "important" })
+                    : undefined
+              }
+              onMouseLeave={
+                item.action === "today" || item.action === "important"
+                  ? () => onSidebarHoverEnd?.()
+                  : undefined
+              }
               className={
                 item.action === "search"
-                  ? "ml-2 mr-[6px] my-2 flex h-[35px] w-auto cursor-pointer items-center gap-2 self-stretch rounded-full border border-[#e3e3e9] py-0 pl-3 pr-[3px] text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800/60"
-             
-                  : `${getItemClassName(isNavItemSelected)} gap-2 px-4`
+                  ? "mx-[6px] my-2 flex h-[35px] w-auto cursor-pointer items-center gap-2 self-stretch rounded-[7px] border border-[#e3e3e9] py-0 pl-3 pr-[3px] text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800/60"
+                  : item.action === "today"
+                    ? `${getNavItemClassName("today", isNavItemSelected)} gap-2 px-4`
+                    : item.action === "important"
+                      ? `${getNavItemClassName("important", isNavItemSelected)} gap-2 px-4`
+                      : `${getItemClassName(isNavItemSelected)} gap-2 px-4`
               }
             >
               {item.action === "search" ? (
@@ -562,7 +614,7 @@ export function Sidebar({
               ) : null}
               {item.action === "today" ? (
                 <TodayCalendarIcon
-                  className={`size-[20px] -ml-[2px] shrink-0 ${navIconColor}`}
+                  className={`size-[19px] -ml-[2px] shrink-0 ${navIconColor}`}
                 />
               ) : null}
               {item.action === "important" ? (
@@ -596,7 +648,7 @@ export function Sidebar({
             ref={listContainerRef}
             className="relative flex flex-col"
             onMouseLeave={() => {
-              onListHoverEnd?.();
+              onSidebarHoverEnd?.();
             }}
           >
             {dropIndicatorTop !== null && (
@@ -612,7 +664,7 @@ export function Sidebar({
               onPointerDown={(event) => handleListPointerDown(event, list.id)}
               onClick={() => handleListClick(list.id)}
               onMouseEnter={() => {
-                onListHoverStart?.(list.id);
+                onSidebarHoverStart?.({ kind: "list", listId: list.id });
               }}
               className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[7px] ${getListRowClassName(list.id)}`}
             >
@@ -642,7 +694,7 @@ export function Sidebar({
                     {list.name}
                   </span>
                 )}
-                <span className="shrink-0 pr-1 text-xs tabular-nums text-zinc-400 transition-[padding] group-hover:pr-8 dark:text-zinc-500">
+                <span className="shrink-0 pr-1 text-xs tabular-nums text-zinc-400 transition-[padding,opacity] group-hover:opacity-0 dark:text-zinc-500">
                   {taskCountByListId[list.id] ?? 0}
                 </span>
               </div>
@@ -655,7 +707,7 @@ export function Sidebar({
                   type="button"
                   aria-label={`Open menu for ${list.name}`}
                   aria-expanded={openMenuListId === list.id}
-                  className={`mr-1 flex size-7 items-center justify-center rounded-md text-zinc-500 transition-opacity hover:bg-zinc-300/60 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-50 cursor-pointer ${
+                  className={`mr-1 flex size-7 items-center justify-center rounded-[8px] text-zinc-500 transition-opacity hover:bg-zinc-200/80 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-50 cursor-pointer ${
                     openMenuListId === list.id
                       ? "opacity-100"
                       : "opacity-0 group-hover:opacity-100"
@@ -668,7 +720,7 @@ export function Sidebar({
                     );
                   }}
                 >
-                  <ThreeDotsIcon className="size-4" />
+                  <PiDotsThreeBold className="size-[19px] text-[#777777]" />
                 </button>
 
                 {openMenuListId === list.id && (
@@ -696,7 +748,7 @@ export function Sidebar({
 
           <button
             type="button"
-            className={`${getItemClassName(false)} gap-2 pr-4 pl-[15px] ml-2 mr-2 w-[235px]! group hover:text-zinc-900 hover:bg-zinc-150! rounded-[7px]`}
+            className={`${getItemClassName(false)} gap-2 pr-4 pl-[15px] group hover:text-zinc-900 hover:bg-zinc-150!`}
             onClick={() => setIsAddListOpen(true)}
           >
             <div className="pl-2 pr-3 py-1 rounded-lg flex items-center gap-1 duration-200">
@@ -708,27 +760,48 @@ export function Sidebar({
           </button>
 
           {labels.length > 0 ? (
-            <div className="mt-3 flex flex-col">
+            <div
+              className="mt-3 flex flex-col"
+              onMouseLeave={() => onSidebarHoverEnd?.()}
+            >
               <p className="px-4 pb-1 text-xs font-medium text-zinc-400 dark:text-zinc-500">
                 Labels
               </p>
-              {labels.map((item) => (
+              {labels.map((item) => {
+                const isHovered =
+                  sidebarHoverPreview?.kind === "label" &&
+                  sidebarHoverPreview.labelId === item.id;
+                const isSelected = selectedLabelId === item.id;
+
+                return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => onSelectLabel(item.id)}
-                  className={`${getItemClassName(selectedLabelId === item.id)} mr-2 gap-2 pl-6 pr-2`}
+                  onMouseEnter={() =>
+                    onSidebarHoverStart?.({ kind: "label", labelId: item.id })
+                  }
+                  className={`${
+                    isHovered
+                      ? `${itemClassName} h-[35px] bg-[#e9ebee]/70`
+                      : getItemClassName(isSelected)
+                  } gap-2 pl-[16px] pr-2 text-[#5b5b5b] ${
+                    isSelected && !isHovered ? "" : "hover:text-[#777777]"
+                  }`}
                 >
-                  <IoPricetagsOutline
-                    className="size-4 shrink-0 text-zinc-700 dark:text-zinc-300"
+                  <IoPricetagOutline
+                    className="size-4 shrink-0 text-[#777777]"
                     aria-hidden="true"
                   />
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  <span className="shrink-0 text-xs tabular-nums text-zinc-400 dark:text-zinc-500 mr-[11px]!">
+                  <span className="min-w-0 flex-1 truncate text-[#777777]">
+                    {item.label}
+                  </span>
+                  <span className="shrink-0 text-xs tabular-nums text-[#777777] mr-[11px]!">
                     {taskCountByLabelId[item.id] ?? 0}
                   </span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           ) : null}
 

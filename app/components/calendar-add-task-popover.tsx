@@ -12,6 +12,8 @@ type CalendarAddTaskPopoverProps = {
   defaultListId: string | null;
   x: number;
   y: number;
+  name: string;
+  onNameChange: (name: string) => void;
   onClose: () => void;
   onAddTask: (payload: {
     name: string;
@@ -64,6 +66,8 @@ export function CalendarAddTaskPopover({
   defaultListId,
   x,
   y,
+  name,
+  onNameChange,
   onClose,
   onAddTask,
 }: CalendarAddTaskPopoverProps) {
@@ -72,7 +76,6 @@ export function CalendarAddTaskPopover({
   const listButtonRef = useRef<HTMLButtonElement>(null);
   const listMenuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: x, top: y + 8 });
-  const [name, setName] = useState("");
   const [content, setContent] = useState("");
   const [selectedListId, setSelectedListId] = useState(
     () => defaultListId ?? lists[0]?.id ?? null,
@@ -213,7 +216,7 @@ export function CalendarAddTaskPopover({
             ref={nameInputRef}
             type="text"
             value={name}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => onNameChange(event.target.value)}
             placeholder="Task name"
             aria-label="Task name"
             className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition-colors focus:border-[#4873c7] dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"

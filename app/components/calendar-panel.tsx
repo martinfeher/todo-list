@@ -186,6 +186,7 @@ export function CalendarMonthView({
     x: number;
     y: number;
   } | null>(null);
+  const [draftTaskName, setDraftTaskName] = useState("");
   const [dropTargetDateKey, setDropTargetDateKey] = useState<string | null>(
     null,
   );
@@ -244,6 +245,11 @@ export function CalendarMonthView({
     );
   }
 
+  function closeAddTaskPopover() {
+    setAddTaskPopover(null);
+    setDraftTaskName("");
+  }
+
   function handleDayClick(
     event:
       | React.MouseEvent<HTMLDivElement>
@@ -267,6 +273,7 @@ export function CalendarMonthView({
       y = rect.top + rect.height / 2;
     }
 
+    setDraftTaskName("");
     setAddTaskPopover({
       date: day,
       x,
@@ -288,7 +295,7 @@ export function CalendarMonthView({
 
     setSelectedDate(day);
     onSelectTask(task.id);
-    setAddTaskPopover(null);
+    closeAddTaskPopover();
     setTaskPopover({
       task,
       x: event.clientX,
@@ -402,14 +409,14 @@ export function CalendarMonthView({
   useEffect(() => {
     if (!monthDate) return;
     setTaskPopover(null);
-    setAddTaskPopover(null);
+    closeAddTaskPopover();
   }, [monthDate]);
 
   if (!monthDate || !selectedDate || !today) {
     return (
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
-          <div className="mx-auto flex h-full w-full max-w-6xl min-h-0 flex-col">
+          <div className="mx-auto flex h-full w-full max-w-8xl min-h-0 flex-col">
             <div className="mb-4 h-8 w-40 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
             <div className="min-h-0 flex-1 animate-pulse rounded-lg bg-zinc-50 dark:bg-zinc-900/40" />
           </div>
@@ -426,7 +433,7 @@ export function CalendarMonthView({
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
-        <div className="mx-auto flex h-full w-full max-w-6xl min-h-0 flex-col">
+        <div className="mx-auto flex h-full w-full max-w-7xl min-h-0 flex-col">
           <div className="mb-4 flex shrink-0 items-center justify-between">
             <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               {formatMonthYear(monthDate)}
@@ -504,9 +511,9 @@ export function CalendarMonthView({
                   }}
                   className={`h-full cursor-pointer border-r border-b border-zinc-200 p-2 text-left transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/60 ${
                     isDropTarget
-                      ? "bg-blue-50 ring-2 ring-inset ring-blue-400 dark:bg-blue-950/30 dark:ring-blue-500"
+                      ? "bg-blue-50 ring-1 ring-inset ring-blue-400 dark:bg-blue-950/30 dark:ring-blue-500"
                       : isActiveDay
-                        ? "bg-blue-50 ring-2 ring-inset ring-[#4873c7] dark:bg-blue-950/30 dark:ring-[#7da2ff]"
+                        ? "bg-blue-50 ring-1 ring-inset ring-[#4873c7] dark:bg-blue-950/30 dark:ring-[#7da2ff]"
                         : isSelected
                           ? "bg-zinc-100 ring-1 ring-inset ring-zinc-300 dark:bg-zinc-900 dark:ring-zinc-600"
                           : "bg-white dark:bg-zinc-950"
@@ -515,9 +522,9 @@ export function CalendarMonthView({
                   <span
                     className={`inline-flex size-7 items-center justify-center rounded-full text-sm ${
                       isToday
-                        ? "bg-zinc-900 font-semibold text-white dark:bg-zinc-50 dark:text-zinc-900"
+                        ? "bg-[#b2b6bf] font-semibold text-white dark:bg-zinc-50 dark:text-zinc-900"
                         : isCurrentMonth
-                          ? "font-medium text-zinc-800 dark:text-zinc-100"
+                          ? "font-medium text-[#b2b6bf] dark:text-zinc-100"
                           : "text-zinc-400"
                     }`}
                   >
@@ -525,7 +532,7 @@ export function CalendarMonthView({
                   </span>
 
                   <div className="mt-1 space-y-0.5">
-                    {dayTasks.slice(0, 3).map((task) => (
+                    {dayTasks.slice(0, isActiveDay ? 2 : 3).map((task) => (
                       <button
                         key={task.id}
                         type="button"
@@ -550,9 +557,22 @@ export function CalendarMonthView({
                         {task.name}
                       </button>
                     ))}
-                    {dayTasks.length > 3 && (
+                    {isActiveDay ? (
+                      <div
+                        aria-hidden="true"
+                        className="block w-full truncate h-[16px] rounded-[6px] bg-zinc-200/50 px-2 py-0.5 text-left text-[11px] text-zinc-400 dark:bg-zinc-700 dark:text-zinc-100"
+                      >
+                        {draftTaskName.trim() || ""}
+                      </div>
+                    ) : null}
+                    {!isActiveDay && dayTasks.length > 3 && (
                       <span className="block px-1 text-[11px] text-zinc-400">
                         +{dayTasks.length - 3} more
+                      </span>
+                    )}
+                    {isActiveDay && dayTasks.length > 2 && (
+                      <span className="block px-1 text-[11px] text-zinc-400">
+                        +{dayTasks.length - 2} more
                       </span>
                     )}
                   </div>
@@ -619,7 +639,9 @@ export function CalendarMonthView({
           defaultListId={defaultListId}
           x={addTaskPopover.x}
           y={addTaskPopover.y}
-          onClose={() => setAddTaskPopover(null)}
+          name={draftTaskName}
+          onNameChange={setDraftTaskName}
+          onClose={closeAddTaskPopover}
           onAddTask={onAddCalendarTask}
         />
       ) : null}

@@ -12,7 +12,7 @@ import {
 } from "./task-row-context-menu";
 import type { Label } from "./task-label-selector";
 import { TaskLabelPills } from "./task-label-pills";
-import { ThreeDotsIcon } from "./three-dots-icon";
+import { PiDotsThreeBold } from "react-icons/pi";
 import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
 import { getTaskPriorityColor } from "@/lib/task-priority";
@@ -356,7 +356,7 @@ export function TaskListTaskRow({
                 onToggleTaskMenu(task.id);
               }}
             >
-              <ThreeDotsIcon className="size-4" />
+              <PiDotsThreeBold className="size-4" />
             </button>
 
             {rowMenuView ? (

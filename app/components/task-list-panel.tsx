@@ -1225,8 +1225,8 @@ export function TaskListPanel({
           : undefined
       }
       onMouseEnter={onPanelMouseEnter}
-      className={`relative shrink-0 bg-white dark:bg-zinc-950 ${
-        isListHovered ? "border-l-2 border-l-[#bbbbbb]" : ""
+      className={`relative shrink-0 bg-white dark:bg-zinc-950 border-l border-l-[#ffffff] ${
+        isListHovered ? "border-l border-l-[#bbbbbb]" : ""
       } ${
         panelWidth != null
           ? "flex min-h-0 flex-col"

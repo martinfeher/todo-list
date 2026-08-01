@@ -329,6 +329,13 @@ export type TaskListItem = Task & {
   listName?: string;
 };
 
+export type SidebarHoverPreview =
+  | { kind: "list"; listId: string }
+  | { kind: "today" }
+  | { kind: "important" }
+  | { kind: "calendar" }
+  | { kind: "label"; labelId: string };
+
 export function TodoApp({
   initialLists,
   initialLabels,
@@ -343,9 +350,10 @@ export function TodoApp({
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
-  const [hoveredListId, setHoveredListId] = useState<string | null>(null);
-  const hoveredListIdRef = useRef<string | null>(null);
-  const clearListHoverTimerRef = useRef<number | null>(null);
+  const [sidebarHoverPreview, setSidebarHoverPreview] =
+    useState<SidebarHoverPreview | null>(null);
+  const sidebarHoverPreviewRef = useRef<SidebarHoverPreview | null>(null);
+  const clearSidebarHoverTimerRef = useRef<number | null>(null);
   const [focusNoteAtEndRequest, setFocusNoteAtEndRequest] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>(initialActiveView);
   const [tasksByList, setTasksByList] = useState(() =>
@@ -361,7 +369,7 @@ export function TodoApp({
   const tasksByListRef = useRef(tasksByList);
   const isApplyingReorderHistoryRef = useRef(false);
   tasksByListRef.current = tasksByList;
-  hoveredListIdRef.current = hoveredListId;
+  sidebarHoverPreviewRef.current = sidebarHoverPreview;
   const completionTimerRef = useRef<Record<string, number>>({});
   const [isListCalendarOpen, setIsListCalendarOpen] = useState(false);
   const listCalendarButtonRef = useRef<HTMLButtonElement>(null);
@@ -436,20 +444,64 @@ export function TodoApp({
   const isHoverPreview =
     hoveredTaskId !== null && hoveredTaskId !== selectedTaskId;
 
-  const previewListId = activeView === "calendar" ? null : hoveredListId;
+  const previewListId =
+    sidebarHoverPreview?.kind === "list" ? sidebarHoverPreview.listId : null;
   const previewList =
     previewListId !== null
       ? (lists.find((list) => list.id === previewListId) ?? null)
       : null;
-  const displayedListId = previewListId ?? selectedListId;
-  const displayedActiveView = previewListId ? null : activeView;
-  const displayedLabelId = previewListId ? null : selectedLabelId;
-  const isListHoverPreview = Boolean(
-    previewListId &&
-      (previewListId !== selectedListId ||
-        activeView !== null ||
-        selectedLabelId !== null),
+  const previewLabelId =
+    sidebarHoverPreview?.kind === "label"
+      ? sidebarHoverPreview.labelId
+      : null;
+  const previewLabel =
+    previewLabelId !== null
+      ? (labels.find((item) => item.id === previewLabelId) ?? null)
+      : null;
+
+  const displayedListId =
+    sidebarHoverPreview == null
+      ? selectedListId
+      : sidebarHoverPreview.kind === "list"
+        ? sidebarHoverPreview.listId
+        : null;
+  const displayedActiveView: ActiveView =
+    sidebarHoverPreview == null
+      ? activeView
+      : sidebarHoverPreview.kind === "today"
+        ? "today"
+        : sidebarHoverPreview.kind === "important"
+          ? "important"
+          : sidebarHoverPreview.kind === "calendar"
+            ? "calendar"
+            : null;
+  const displayedLabelId =
+    sidebarHoverPreview == null
+      ? selectedLabelId
+      : sidebarHoverPreview.kind === "label"
+        ? sidebarHoverPreview.labelId
+        : null;
+
+  const isSidebarHoverPreview = Boolean(
+    sidebarHoverPreview &&
+      (sidebarHoverPreview.kind === "list"
+        ? sidebarHoverPreview.listId !== selectedListId ||
+          activeView !== null ||
+          selectedLabelId !== null
+        : sidebarHoverPreview.kind === "today"
+          ? activeView !== "today"
+          : sidebarHoverPreview.kind === "important"
+            ? activeView !== "important"
+            : sidebarHoverPreview.kind === "calendar"
+              ? activeView !== "calendar"
+              : sidebarHoverPreview.labelId !== selectedLabelId ||
+                activeView !== null ||
+                selectedListId !== null),
   );
+
+  const showingCalendarMonth =
+    activeView === "calendar" &&
+    (sidebarHoverPreview == null || sidebarHoverPreview.kind === "calendar");
 
   const selectedList = lists.find((list) => list.id === selectedListId) ?? null;
   const selectedLabel =
@@ -466,17 +518,23 @@ export function TodoApp({
   const taskListTitle =
     previewList
       ? previewList.name
-      : selectedLabel
-        ? selectedLabel.label
-        : activeView === "today"
+      : previewLabel
+        ? previewLabel.label
+        : sidebarHoverPreview?.kind === "today"
           ? "Today"
-          // : activeView === "next7days"
-          //   ? "Next 7 days"
-          : activeView === "important"
+          : sidebarHoverPreview?.kind === "important"
             ? "Important"
-            : activeView === "calendar"
+            : sidebarHoverPreview?.kind === "calendar"
               ? "Calendar"
-              : (selectedList?.name ?? null);
+              : selectedLabel
+                ? selectedLabel.label
+                : activeView === "today"
+                  ? "Today"
+                  : activeView === "important"
+                    ? "Important"
+                    : activeView === "calendar"
+                      ? "Calendar"
+                      : (selectedList?.name ?? null);
 
   const taskListItems: TaskListItem[] = getVisibleTasks(
     displayedActiveView,
@@ -757,45 +815,68 @@ export function TodoApp({
     );
   }
 
-  const cancelListHoverClear = useCallback(() => {
-    if (clearListHoverTimerRef.current !== null) {
-      window.clearTimeout(clearListHoverTimerRef.current);
-      clearListHoverTimerRef.current = null;
+  const cancelSidebarHoverClear = useCallback(() => {
+    if (clearSidebarHoverTimerRef.current !== null) {
+      window.clearTimeout(clearSidebarHoverTimerRef.current);
+      clearSidebarHoverTimerRef.current = null;
     }
   }, []);
 
-  const handleListHoverStart = useCallback(
-    (listId: string) => {
-      cancelListHoverClear();
-      setHoveredListId(listId);
+  const handleSidebarHoverStart = useCallback(
+    (preview: SidebarHoverPreview) => {
+      cancelSidebarHoverClear();
+      setSidebarHoverPreview(preview);
     },
-    [cancelListHoverClear],
+    [cancelSidebarHoverClear],
   );
 
-  const handleListHoverEnd = useCallback(() => {
-    cancelListHoverClear();
-    clearListHoverTimerRef.current = window.setTimeout(() => {
-      clearListHoverTimerRef.current = null;
-      setHoveredListId(null);
+  const handleSidebarHoverEnd = useCallback(() => {
+    cancelSidebarHoverClear();
+    clearSidebarHoverTimerRef.current = window.setTimeout(() => {
+      clearSidebarHoverTimerRef.current = null;
+      setSidebarHoverPreview(null);
     }, 120);
-  }, [cancelListHoverClear]);
+  }, [cancelSidebarHoverClear]);
 
-  function commitHoveredListSelection() {
-    cancelListHoverClear();
-    const listId = hoveredListIdRef.current;
-    if (!listId) return;
+  function commitSidebarHoverSelection() {
+    cancelSidebarHoverClear();
+    const preview = sidebarHoverPreviewRef.current;
+    if (!preview) return;
 
-    setHoveredListId(null);
+    setSidebarHoverPreview(null);
 
-    if (
-      listId === selectedListId &&
-      activeView === null &&
-      selectedLabelId === null
-    ) {
+    if (preview.kind === "list") {
+      if (
+        preview.listId === selectedListId &&
+        activeView === null &&
+        selectedLabelId === null
+      ) {
+        return;
+      }
+      selectList(preview.listId);
       return;
     }
 
-    selectList(listId);
+    if (preview.kind === "today") {
+      if (activeView === "today") return;
+      selectToday();
+      return;
+    }
+
+    if (preview.kind === "important") {
+      if (activeView === "important") return;
+      selectImportant();
+      return;
+    }
+
+    if (preview.kind === "calendar") {
+      if (activeView === "calendar") return;
+      selectCalendar();
+      return;
+    }
+
+    if (preview.labelId === selectedLabelId) return;
+    selectLabel(preview.labelId);
   }
 
   function selectToday() {
@@ -919,13 +1000,14 @@ export function TodoApp({
     if (!name.trim()) return;
 
     const targetListId =
-      previewListId ??
-      selectedListId ??
-      (activeView === "today" ? (lists[0]?.id ?? null) : null);
+      displayedListId ??
+      (displayedActiveView === "today" ? (lists[0]?.id ?? null) : null);
     if (!targetListId) return;
 
     const dueDateValue =
-      previewListId || activeView !== "today" ? null : getTodayDateValue();
+      displayedListId || displayedActiveView !== "today"
+        ? null
+        : getTodayDateValue();
     const task = await createTask(targetListId, name.trim(), dueDateValue);
     const newTask: Task = {
       id: task.id,
@@ -1469,9 +1551,12 @@ export function TodoApp({
   const handleListCalendarButtonMouseLeave = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       const panel = listCalendarPanelRef.current;
-      const relatedTarget = event.relatedTarget as Node | null;
+      const relatedTarget = event.relatedTarget;
 
-      if (relatedTarget && panel?.contains(relatedTarget)) {
+      if (
+        relatedTarget instanceof Node &&
+        panel?.contains(relatedTarget)
+      ) {
         return;
       }
 
@@ -1483,9 +1568,12 @@ export function TodoApp({
   const handleListCalendarPanelMouseLeave = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       const button = listCalendarButtonRef.current;
-      const relatedTarget = event.relatedTarget as Node | null;
+      const relatedTarget = event.relatedTarget;
 
-      if (relatedTarget && button?.contains(relatedTarget)) {
+      if (
+        relatedTarget instanceof Node &&
+        button?.contains(relatedTarget)
+      ) {
         return;
       }
 
@@ -1506,15 +1594,15 @@ export function TodoApp({
   }, [selectedLabelId, activeView]);
 
   useEffect(() => {
-    setHoveredListId(null);
+    setSidebarHoverPreview(null);
   }, [selectedListId, selectedLabelId, activeView]);
 
   useEffect(() => {
     return () => {
       cancelListCalendarClose();
-      cancelListHoverClear();
+      cancelSidebarHoverClear();
     };
-  }, [cancelListCalendarClose, cancelListHoverClear]);
+  }, [cancelListCalendarClose, cancelSidebarHoverClear]);
 
   const showRightPanel = displayedTaskId !== null || isListCalendarOpen;
   const showTaskDetails = displayedTaskId !== null && !isListCalendarOpen;
@@ -1569,11 +1657,11 @@ export function TodoApp({
           onRenameList={renameList}
           onRemoveList={removeList}
           onReorderLists={reorderLists}
-          onListHoverStart={handleListHoverStart}
-          onListHoverEnd={handleListHoverEnd}
-          hoveredListId={hoveredListId}
+          onSidebarHoverStart={handleSidebarHoverStart}
+          onSidebarHoverEnd={handleSidebarHoverEnd}
+          sidebarHoverPreview={sidebarHoverPreview}
         />
-        {activeView === "calendar" ? (
+        {showingCalendarMonth ? (
           <CalendarPanel
             tasks={calendarTasks}
             lists={lists}
@@ -1598,7 +1686,7 @@ export function TodoApp({
           >
             <div
               className="flex min-h-0 shrink-0"
-              onMouseEnter={commitHoveredListSelection}
+              onMouseEnter={commitSidebarHoverSelection}
             >
               <TaskListPanel
                 title={taskListTitle}
@@ -1610,7 +1698,7 @@ export function TodoApp({
                 expanded={false}
                 showAddTask={
                   displayedListId !== null ||
-                  (activeView === "today" && lists.length > 0 && previewListId === null)
+                  (displayedActiveView === "today" && lists.length > 0)
                 }
                 isLabelFilter={displayedLabelId !== null}
                 listId={displayedListId}
@@ -1634,7 +1722,7 @@ export function TodoApp({
                 listCalendarButtonRef={listCalendarButtonRef}
                 onListCalendarHoverStart={openListCalendar}
                 onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
-                isListHovered={hoveredListId !== null}
+                isListHovered={sidebarHoverPreview !== null}
               />
               <PanelResizeHandle onPointerDown={handleTaskListResizeStart} />
             </div>
@@ -1663,8 +1751,8 @@ export function TodoApp({
               {showTaskDetails && (
                 <div
                   className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-[filter] duration-200 ${
-                    isListHoverPreview
-                      ? "pointer-events-none blur-[2px] brightness-[0.89]"
+                    isSidebarHoverPreview
+                      ? "pointer-events-none blur-[1.5px] brightness-[0.985]"
                       : ""
                   }`}
                 >
@@ -1693,7 +1781,7 @@ export function TodoApp({
               expanded
               showAddTask={
                 displayedListId !== null ||
-                (activeView === "today" && lists.length > 0 && previewListId === null)
+                (displayedActiveView === "today" && lists.length > 0)
               }
               isLabelFilter={displayedLabelId !== null}
               listId={displayedListId}
@@ -1717,8 +1805,8 @@ export function TodoApp({
               listCalendarButtonRef={listCalendarButtonRef}
               onListCalendarHoverStart={openListCalendar}
               onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
-              isListHovered={hoveredListId !== null}
-              onPanelMouseEnter={commitHoveredListSelection}
+              isListHovered={sidebarHoverPreview !== null}
+              onPanelMouseEnter={commitSidebarHoverSelection}
             />
           </>
         )}
