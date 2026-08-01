@@ -216,6 +216,8 @@ type TaskListPanelProps = {
   listCalendarButtonRef?: RefObject<HTMLButtonElement | null>;
   onListCalendarHoverStart?: () => void;
   onListCalendarHoverLeave?: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  isListHovered?: boolean;
+  onPanelMouseEnter?: () => void;
 };
 
 export function TaskListPanel({
@@ -251,6 +253,8 @@ export function TaskListPanel({
   listCalendarButtonRef,
   onListCalendarHoverStart,
   onListCalendarHoverLeave,
+  isListHovered = false,
+  onPanelMouseEnter,
 }: TaskListPanelProps) {
   const [newTaskName, setNewTaskName] = useState("");
   const [isAddingTask, setIsAddingTask] = useState(false);
@@ -1220,7 +1224,10 @@ export function TaskListPanel({
           ? { width: panelWidth, minWidth: 300, flexShrink: 0 }
           : undefined
       }
+      onMouseEnter={onPanelMouseEnter}
       className={`relative shrink-0 bg-white dark:bg-zinc-950 ${
+        isListHovered ? "border-l-2 border-l-[#bbbbbb]" : ""
+      } ${
         panelWidth != null
           ? "flex min-h-0 flex-col"
           : embedded
@@ -1374,11 +1381,7 @@ export function TaskListPanel({
 
           <div
             className={
-              panelWidth != null
-                ? `min-h-0 flex-1 overflow-y-auto${showAddTask && !isAddingTask ? " pb-20" : ""}`
-                : showAddTask && !isAddingTask
-                  ? "pb-20"
-                  : undefined
+              panelWidth != null ? "min-h-0 flex-1 overflow-y-auto" : undefined
             }
           >
           {showAddTask && pinnedVisibleTasks.length > 0 && (
@@ -1460,16 +1463,6 @@ export function TaskListPanel({
           ) : null}
           </div>
 
-          {showAddTask && !isAddingTask ? (
-            <button
-              type="button"
-              aria-label="Add task"
-              onClick={startAddingTask}
-              className="absolute bottom-5 right-5 z-30 flex size-12 items-center justify-center rounded-full bg-[#4873c7] text-white shadow-[0_4px_14px_rgba(72,115,199,0.45)] transition-colors hover:bg-[#3f68bd] cursor-pointer dark:shadow-[0_4px_14px_rgba(0,0,0,0.4)]"
-            >
-              <LuPlus className="size-6" aria-hidden="true" />
-            </button>
-          ) : null}
         </div>
       ) : (
         <div className="p-4">

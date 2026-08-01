@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -585,49 +586,66 @@ export function SearchModal({
                         : undefined
                     }
                   >
-                    {results.map((task, index) => (
-                      <li
-                        key={task.id}
-                        id={`search-result-${task.id}`}
-                        ref={(element) => {
-                          resultRefs.current[index] = element;
-                        }}
-                        role="option"
-                        aria-selected={index === activeIndex}
-                        onMouseEnter={() => setActiveIndex(index)}
-                        className={`flex min-h-11 cursor-pointer items-center gap-3 border-b border-zinc-100 px-4 dark:border-zinc-800 ${
-                          index === activeIndex
-                            ? "bg-zinc-100 dark:bg-zinc-800"
-                            : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                        }`}
-                      >
-                        <TaskCompletionCheckbox
-                          checked={task.completed}
-                          onChange={() => onToggleTask(task.id)}
-                          onClick={(event) => event.stopPropagation()}
-                          className="shrink-0"
-                          aria-label={`Mark ${task.name} complete`}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => selectTask(task)}
-                          className="min-w-0 flex-1 py-2.5 text-left"
-                        >
-                          <span
-                            className={`block truncate text-sm ${
-                              task.completed
-                                ? "text-zinc-400 line-through dark:text-zinc-500"
-                                : "text-zinc-900 dark:text-zinc-50"
+                    {results.map((task, index) => {
+                      const isFirstCompleted =
+                        task.completed &&
+                        (index === 0 || !results[index - 1]?.completed);
+
+                      return (
+                        <Fragment key={task.id}>
+                          {isFirstCompleted ? (
+                            <li
+                              role="presentation"
+                              className="px-4 pb-1 pt-[10px] text-[10px] font-medium text-[#999999]"
+                            >
+                              Completed
+                            </li>
+                          ) : null}
+                          <li
+                            id={`search-result-${task.id}`}
+                            ref={(element) => {
+                              resultRefs.current[index] = element;
+                            }}
+                            role="option"
+                            aria-selected={index === activeIndex}
+                            onMouseEnter={() => setActiveIndex(index)}
+                            className={`flex min-h-11 cursor-pointer items-center gap-3 border-b border-zinc-100 px-4 dark:border-zinc-800 ${
+                              task.completed ? "blur-[1px]" : ""
+                            } ${
+                              index === activeIndex
+                                ? "bg-zinc-100 dark:bg-zinc-800"
+                                : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                             }`}
                           >
-                            {highlightSearchMatch(task.name, highlightQuery)}
-                          </span>
-                          <span className="block truncate text-xs text-zinc-400 dark:text-zinc-500">
-                            {task.listName}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                            <TaskCompletionCheckbox
+                              checked={task.completed}
+                              onChange={() => onToggleTask(task.id)}
+                              onClick={(event) => event.stopPropagation()}
+                              className="shrink-0"
+                              aria-label={`Mark ${task.name} complete`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => selectTask(task)}
+                              className="min-w-0 flex-1 py-2.5 text-left"
+                            >
+                              <span
+                                className={`block truncate text-sm ${
+                                  task.completed
+                                    ? "text-zinc-400 line-through dark:text-zinc-500"
+                                    : "text-zinc-900 dark:text-zinc-50"
+                                }`}
+                              >
+                                {highlightSearchMatch(task.name, highlightQuery)}
+                              </span>
+                              <span className="block truncate text-xs text-zinc-400 dark:text-zinc-500">
+                                {task.listName}
+                              </span>
+                            </button>
+                          </li>
+                        </Fragment>
+                      );
+                    })}
                   </ul>
                   {results.length >= SEARCH_RESULT_LIMIT && (
                     <p className="px-4 py-3 text-xs text-zinc-400 dark:text-zinc-500">

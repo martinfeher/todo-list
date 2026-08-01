@@ -694,10 +694,35 @@ export function removeImageWrapper(editor: HTMLElement, wrapper: HTMLElement) {
   return true;
 }
 
+const CLIPBOARD_REVEAL_ATTR = "data-clipboard-reveal";
+
+function startClipboardRevealAnimation(wrapper: HTMLElement) {
+  wrapper.setAttribute(CLIPBOARD_REVEAL_ATTR, "true");
+
+  const image = wrapper.querySelector("img.detail-image");
+  if (!(image instanceof HTMLImageElement)) {
+    wrapper.removeAttribute(CLIPBOARD_REVEAL_ATTR);
+    return;
+  }
+
+  let cleanedUp = false;
+
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    wrapper.removeAttribute(CLIPBOARD_REVEAL_ATTR);
+    image.removeEventListener("animationend", cleanup);
+  };
+
+  image.addEventListener("animationend", cleanup);
+  window.setTimeout(cleanup, 650);
+}
+
 export async function insertImagesIntoEditor(
   editor: HTMLElement,
   imageSources: string[],
   referenceLine?: HTMLElement | null,
+  options?: { fromClipboard?: boolean },
 ) {
   if (imageSources.length === 0) return;
 
@@ -730,6 +755,10 @@ export async function insertImagesIntoEditor(
     }
 
     insertImageWrapperIntoLine(editor, targetLine, wrapper);
+
+    if (options?.fromClipboard) {
+      startClipboardRevealAnimation(wrapper);
+    }
   }
 
   syncLineEmptyState(editor);

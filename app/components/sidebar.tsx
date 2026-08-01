@@ -65,6 +65,7 @@ type SidebarProps = {
   onReorderLists?: (listIds: string[]) => void;
   onListHoverStart?: (listId: string) => void;
   onListHoverEnd?: () => void;
+  hoveredListId?: string | null;
 };
 
 const LIST_DRAG_THRESHOLD_PX = 5;
@@ -124,6 +125,7 @@ export function Sidebar({
   onReorderLists,
   onListHoverStart,
   onListHoverEnd,
+  hoveredListId = null,
 }: SidebarProps) {
   const [orderedLists, setOrderedLists] = useState(lists);
   const [dropIndicatorTop, setDropIndicatorTop] = useState<number | null>(null);
@@ -135,7 +137,6 @@ export function Sidebar({
   const [isAddListOpen, setIsAddListOpen] = useState(false);
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [listNameDraft, setListNameDraft] = useState("");
-  const [hoveredListId, setHoveredListId] = useState<string | null>(null);
   const [isCalendarPreviewOpen, setIsCalendarPreviewOpen] = useState(false);
   const [calendarPreviewPosition, setCalendarPreviewPosition] = useState({
     top: 0,
@@ -215,7 +216,7 @@ export function Sidebar({
     const isHovered = hoveredListId === listId;
 
     if (isHovered) {
-      return "bg-[#e9ebee]/70 dark:bg-zinc-800/60";
+      return "border-r-2 border-[#bbbbbb] bg-[#e9ebee]/70 dark:bg-zinc-800/60";
     }
 
     if (isSelected) {
@@ -595,7 +596,6 @@ export function Sidebar({
             ref={listContainerRef}
             className="relative flex flex-col"
             onMouseLeave={() => {
-              setHoveredListId(null);
               onListHoverEnd?.();
             }}
           >
@@ -612,7 +612,6 @@ export function Sidebar({
               onPointerDown={(event) => handleListPointerDown(event, list.id)}
               onClick={() => handleListClick(list.id)}
               onMouseEnter={() => {
-                setHoveredListId(list.id);
                 onListHoverStart?.(list.id);
               }}
               className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[7px] ${getListRowClassName(list.id)}`}

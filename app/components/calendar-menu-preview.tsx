@@ -188,14 +188,14 @@ export function CalendarMenuPreview({
 
   return createPortal(
     <div
-      className="fixed z-[100] flex h-[300px] w-[300px] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+      className="glass-card fixed z-[100] flex h-[300px] w-[300px] flex-col"
       style={{ top, left }}
       role="region"
       aria-label="Calendar preview"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div className="relative z-[1] min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <PreviewDaySection
           heading="Today"
           subheading={formatMonthDay(today)}
@@ -210,7 +210,8 @@ export function CalendarMenuPreview({
           emptyMessage="No events"
         />
       </div>
-    </div>,
+    </div>
+    ,
     document.body,
   );
 }

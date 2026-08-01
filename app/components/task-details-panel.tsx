@@ -1674,7 +1674,9 @@ export function TaskDetailsPanel({
 
       if (taskIdRef.current !== currentTaskId || !editorRef.current) return;
 
-      await insertImagesIntoEditor(editor, sources, referenceLine);
+      await insertImagesIntoEditor(editor, sources, referenceLine, {
+        fromClipboard: options?.fromClipboard,
+      });
       syncEditorContent();
       recordHistorySnapshot();
       if (options?.fromClipboard) {

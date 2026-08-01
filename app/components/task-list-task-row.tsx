@@ -169,11 +169,8 @@ export function TaskListTaskRow({
     (openDatePickerTaskId === task.id || rowMenuView !== null);
 
   const priorityColor = getTaskPriorityColor(task.priority);
-  const basePaddingLeft = useWiderRowPadding ? 15 : priorityColor ? 2 : 5;
+  const basePaddingLeft = useWiderRowPadding ? 15 : 5;
   const rowPaddingLeft = basePaddingLeft + depth * SUBTASK_INDENT_PX;
-  const priorityBorderStyle = priorityColor
-    ? { borderLeftWidth: 3, borderLeftStyle: "solid" as const, borderLeftColor: priorityColor }
-    : undefined;
   const isSelected = task.id === selectedTaskId;
 
   if (isCompleting) {
@@ -207,10 +204,10 @@ export function TaskListTaskRow({
         showDragHandle ? "touch-none" : ""
       } ${
         isSelected
-          ? "bg-[#e9ebee]/90 hover:bg-[#e9ebee]"
+          ? "bg-[#e9ebee]/50 hover:bg-[#e9ebee]/80"
           : "hover:bg-[#faf6ff]"
       }`}
-      style={{ paddingLeft: rowPaddingLeft, ...priorityBorderStyle }}
+      style={{ paddingLeft: rowPaddingLeft }}
     >
       {showDragHandle ? (
         <span
@@ -258,15 +255,24 @@ export function TaskListTaskRow({
           <TaskLabelPills labels={task.labels} className="max-w-[140px]" />
         ) : null}
 
-        {dueDateLabel ? (
-          <span
-            className={`pointer-events-none absolute right-0 whitespace-nowrap text-xs text-zinc-400 transition-opacity dark:text-zinc-500 ${
-              isRowMenuOpen ? "opacity-0" : "opacity-100 group-hover:opacity-0"
-            }`}
-          >
-            {dueDateLabel}
-          </span>
-        ) : null}
+        <div
+          className={`pointer-events-none absolute right-0 flex items-center gap-1.5 transition-opacity ${
+            isRowMenuOpen ? "opacity-0" : "opacity-100 group-hover:opacity-0"
+          }`}
+        >
+          {priorityColor ? (
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: priorityColor }}
+            />
+          ) : null}
+          {dueDateLabel ? (
+            <span className="whitespace-nowrap text-xs text-zinc-400 dark:text-zinc-500">
+              {dueDateLabel}
+            </span>
+          ) : null}
+        </div>
 
         <div
           className={`absolute right-0 flex items-center gap-1.5 transition-opacity ${
@@ -275,6 +281,13 @@ export function TaskListTaskRow({
               : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
           }`}
         >
+          {priorityColor ? (
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: priorityColor }}
+            />
+          ) : null}
           {dueDateLabel ? (
             <span
               className={`pointer-events-none whitespace-nowrap text-xs text-zinc-400 dark:text-zinc-500 ${

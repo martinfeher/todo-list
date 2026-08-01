@@ -344,6 +344,8 @@ export function TodoApp({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
   const [hoveredListId, setHoveredListId] = useState<string | null>(null);
+  const hoveredListIdRef = useRef<string | null>(null);
+  const clearListHoverTimerRef = useRef<number | null>(null);
   const [focusNoteAtEndRequest, setFocusNoteAtEndRequest] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>(initialActiveView);
   const [tasksByList, setTasksByList] = useState(() =>
@@ -359,6 +361,7 @@ export function TodoApp({
   const tasksByListRef = useRef(tasksByList);
   const isApplyingReorderHistoryRef = useRef(false);
   tasksByListRef.current = tasksByList;
+  hoveredListIdRef.current = hoveredListId;
   const completionTimerRef = useRef<Record<string, number>>({});
   const [isListCalendarOpen, setIsListCalendarOpen] = useState(false);
   const listCalendarButtonRef = useRef<HTMLButtonElement>(null);
@@ -752,6 +755,47 @@ export function TodoApp({
     setSelectedTaskId(
       getFirstVisibleTaskId(null, listId, null, lists, tasksByList),
     );
+  }
+
+  const cancelListHoverClear = useCallback(() => {
+    if (clearListHoverTimerRef.current !== null) {
+      window.clearTimeout(clearListHoverTimerRef.current);
+      clearListHoverTimerRef.current = null;
+    }
+  }, []);
+
+  const handleListHoverStart = useCallback(
+    (listId: string) => {
+      cancelListHoverClear();
+      setHoveredListId(listId);
+    },
+    [cancelListHoverClear],
+  );
+
+  const handleListHoverEnd = useCallback(() => {
+    cancelListHoverClear();
+    clearListHoverTimerRef.current = window.setTimeout(() => {
+      clearListHoverTimerRef.current = null;
+      setHoveredListId(null);
+    }, 120);
+  }, [cancelListHoverClear]);
+
+  function commitHoveredListSelection() {
+    cancelListHoverClear();
+    const listId = hoveredListIdRef.current;
+    if (!listId) return;
+
+    setHoveredListId(null);
+
+    if (
+      listId === selectedListId &&
+      activeView === null &&
+      selectedLabelId === null
+    ) {
+      return;
+    }
+
+    selectList(listId);
   }
 
   function selectToday() {
@@ -1468,8 +1512,9 @@ export function TodoApp({
   useEffect(() => {
     return () => {
       cancelListCalendarClose();
+      cancelListHoverClear();
     };
-  }, [cancelListCalendarClose]);
+  }, [cancelListCalendarClose, cancelListHoverClear]);
 
   const showRightPanel = displayedTaskId !== null || isListCalendarOpen;
   const showTaskDetails = displayedTaskId !== null && !isListCalendarOpen;
@@ -1524,8 +1569,9 @@ export function TodoApp({
           onRenameList={renameList}
           onRemoveList={removeList}
           onReorderLists={reorderLists}
-          onListHoverStart={setHoveredListId}
-          onListHoverEnd={() => setHoveredListId(null)}
+          onListHoverStart={handleListHoverStart}
+          onListHoverEnd={handleListHoverEnd}
+          hoveredListId={hoveredListId}
         />
         {activeView === "calendar" ? (
           <CalendarPanel
@@ -1550,42 +1596,48 @@ export function TodoApp({
             ref={splitContainerRef}
             className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
           >
-            <TaskListPanel
-              title={taskListTitle}
-              tasks={taskListItems}
-              lists={lists}
-              completingTaskIds={completingTaskIds}
-              selectedTaskId={selectedTaskId}
-              panelWidth={taskListWidth}
-              expanded={false}
-              showAddTask={
-                displayedListId !== null ||
-                (activeView === "today" && lists.length > 0 && previewListId === null)
-              }
-              isLabelFilter={displayedLabelId !== null}
-              listId={displayedListId}
-              onAddTask={addTask}
-              onToggleTask={toggleTask}
-              onSelectTask={setSelectedTaskId}
-              onRenameTask={renameTask}
-              onTaskNameChange={handleTaskRenamed}
-              onReorderTasks={reorderTasks}
-              onSetTaskDueDate={setTaskDueDate}
-              onSetTaskDueTime={setTaskDueTime}
-              onSetTaskPriority={setTaskPriority}
-              onSetTaskPinned={setTaskPinned}
-              onSetTaskImportant={setTaskImportant}
-              onToggleTaskLabel={toggleTaskLabel}
-              onLabelsChanged={refreshLabels}
-              onMoveTaskToList={moveTaskToList}
-              onTaskHoverStart={handleTaskHoverStart}
-              onTaskHoverEnd={() => setHoveredTaskId(null)}
-              showListCalendarButton={displayedListId !== null}
-              listCalendarButtonRef={listCalendarButtonRef}
-              onListCalendarHoverStart={openListCalendar}
-              onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
-            />
-            <PanelResizeHandle onPointerDown={handleTaskListResizeStart} />
+            <div
+              className="flex min-h-0 shrink-0"
+              onMouseEnter={commitHoveredListSelection}
+            >
+              <TaskListPanel
+                title={taskListTitle}
+                tasks={taskListItems}
+                lists={lists}
+                completingTaskIds={completingTaskIds}
+                selectedTaskId={selectedTaskId}
+                panelWidth={taskListWidth}
+                expanded={false}
+                showAddTask={
+                  displayedListId !== null ||
+                  (activeView === "today" && lists.length > 0 && previewListId === null)
+                }
+                isLabelFilter={displayedLabelId !== null}
+                listId={displayedListId}
+                onAddTask={addTask}
+                onToggleTask={toggleTask}
+                onSelectTask={setSelectedTaskId}
+                onRenameTask={renameTask}
+                onTaskNameChange={handleTaskRenamed}
+                onReorderTasks={reorderTasks}
+                onSetTaskDueDate={setTaskDueDate}
+                onSetTaskDueTime={setTaskDueTime}
+                onSetTaskPriority={setTaskPriority}
+                onSetTaskPinned={setTaskPinned}
+                onSetTaskImportant={setTaskImportant}
+                onToggleTaskLabel={toggleTaskLabel}
+                onLabelsChanged={refreshLabels}
+                onMoveTaskToList={moveTaskToList}
+                onTaskHoverStart={handleTaskHoverStart}
+                onTaskHoverEnd={() => setHoveredTaskId(null)}
+                showListCalendarButton={displayedListId !== null}
+                listCalendarButtonRef={listCalendarButtonRef}
+                onListCalendarHoverStart={openListCalendar}
+                onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
+                isListHovered={hoveredListId !== null}
+              />
+              <PanelResizeHandle onPointerDown={handleTaskListResizeStart} />
+            </div>
             <div className="flex min-h-0 min-w-[300px] flex-1 flex-col overflow-hidden">
               {isListCalendarOpen && (
                 <div
@@ -1610,9 +1662,9 @@ export function TodoApp({
               )}
               {showTaskDetails && (
                 <div
-                  className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-[filter,opacity] duration-200 ${
+                  className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-[filter] duration-200 ${
                     isListHoverPreview
-                      ? "pointer-events-none blur-[2px] opacity-75 saturate-90"
+                      ? "pointer-events-none blur-[2px] brightness-[0.89]"
                       : ""
                   }`}
                 >
@@ -1665,6 +1717,8 @@ export function TodoApp({
               listCalendarButtonRef={listCalendarButtonRef}
               onListCalendarHoverStart={openListCalendar}
               onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
+              isListHovered={hoveredListId !== null}
+              onPanelMouseEnter={commitHoveredListSelection}
             />
           </>
         )}
