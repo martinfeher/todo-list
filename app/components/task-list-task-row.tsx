@@ -213,7 +213,6 @@ export function TaskListTaskRow({
         <span
           aria-hidden="true"
           className="flex size-[19px] ml-[2px] mr-[1px] shrink-0 cursor-move items-center justify-center transition-opacity group-hover:opacity-100"
-          // className="flex size-[19px] ml-[2px] mr-[1px] shrink-0 cursor-move items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
         >
           <InteractIcon className="size-3.5 text-[#c3c6cc] group-hover:text-[#7e828b]" />
         </span>
@@ -263,7 +262,7 @@ export function TaskListTaskRow({
           {priorityColor ? (
             <span
               aria-hidden="true"
-              className="size-1.5 shrink-0 rounded-full"
+              className="size-[7px] shrink-0 rounded-full"
               style={{ backgroundColor: priorityColor }}
             />
           ) : null}
@@ -284,7 +283,7 @@ export function TaskListTaskRow({
           {priorityColor ? (
             <span
               aria-hidden="true"
-              className="size-1.5 shrink-0 rounded-full"
+              className="size-[7px] shrink-0 rounded-full"
               style={{ backgroundColor: priorityColor }}
             />
           ) : null}

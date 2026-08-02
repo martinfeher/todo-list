@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { IoIosSearch } from "react-icons/io";
 import { IoPricetagOutline } from "react-icons/io5";
-import { LuPlus, LuStar } from "react-icons/lu";
+import { LuArrowRight, LuPlus, LuStar } from "react-icons/lu";
 import { PiDotsThreeBold } from "react-icons/pi";
 import { BsCalendar3 } from "react-icons/bs";
 
@@ -50,6 +50,7 @@ type SidebarProps = {
   searchTasks: SearchTask[];
   calendarTasks: TaskListItem[];
   selectedListId: string | null;
+  suppressListSelectionHighlightId?: string | null;
   selectedLabelId: string | null;
   isTodaySelected: boolean;
   // isNext7DaysSelected: boolean;
@@ -101,6 +102,17 @@ function getItemClassName(isSelected: boolean, baseClassName = itemClassName) {
   }`;
 }
 
+function NavHoverArrow() {
+  return (
+    <span
+      aria-hidden="true"
+      className="nav-hover-arrow ml-auto inline-flex shrink-0"
+    >
+      <LuArrowRight className="size-[12.6px]" strokeWidth={2.25} />
+    </span>
+  );
+}
+
 export function Sidebar({
   lists,
   labels,
@@ -110,6 +122,7 @@ export function Sidebar({
   searchTasks,
   calendarTasks,
   selectedListId,
+  suppressListSelectionHighlightId = null,
   selectedLabelId,
   isTodaySelected,
   // isNext7DaysSelected,
@@ -218,25 +231,26 @@ export function Sidebar({
   }
 
   function getListRowClassName(listId: string) {
-    const isSelected = isListSelected(listId);
+    const isSelected =
+      isListSelected(listId) && listId !== suppressListSelectionHighlightId;
     const isHovered =
       sidebarHoverPreview?.kind === "list" &&
       sidebarHoverPreview.listId === listId;
     const isAnySidebarHover = sidebarHoverPreview !== null;
 
     if (isHovered) {
-      return "border-r-2 border-[#cfcfcf] bg-[#e9ebee]/70 dark:bg-zinc-800/60";
+      return "border-r border-[#cfcfcf] bg-[#e9ebee]";
     }
 
     if (isSelected) {
       if (isAnySidebarHover && !isHovered) {
-        return "bg-[#e9ebee]/50 dark:bg-zinc-800";
+        return "border-r border-transparent bg-[#e9ebee]/50 dark:bg-zinc-800";
       }
 
-      return "bg-[#e9ebee]/50 dark:bg-zinc-800";
+      return "border-r border-transparent bg-[#e9ebee]/50 dark:bg-zinc-800";
     }
 
-    return "hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60";
+    return "border-r-2 border-transparent hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60";
   }
 
   function getNavItemClassName(
@@ -250,17 +264,17 @@ export function Sidebar({
     const isAnySidebarHover = sidebarHoverPreview !== null;
 
     if (isHovered) {
-      return `${itemClassName} h-[35px] bg-[#e9ebee]/70 dark:bg-zinc-800/60`;
+      return `${itemClassName} group h-[35px] w-full bg-[#e9ebee]/70 dark:bg-zinc-800/60`;
     }
 
     if (isSelected) {
       if (isAnySidebarHover) {
-        return `${itemClassName} h-[35px] bg-[#e9ebee]/50 font-medium text-[#111111] dark:bg-zinc-800 dark:text-zinc-50`;
+        return `${itemClassName} group h-[35px] w-full bg-[#e9ebee]/50 font-medium text-[#111111] dark:bg-zinc-800 dark:text-zinc-50`;
       }
-      return getItemClassName(true);
+      return `${getItemClassName(true)} group w-full`;
     }
 
-    return getItemClassName(false);
+    return `${getItemClassName(false)} group w-full`;
   }
 
   function cancelCalendarPreviewClose() {
@@ -569,6 +583,7 @@ export function Sidebar({
                     aria-hidden="true"
                   />
                   {item.label}
+                  <NavHoverArrow />
                 </button>
               </div>
             ) : (
@@ -624,6 +639,9 @@ export function Sidebar({
                 />
               ) : null}
               {item.label}
+              {item.action === "today" || item.action === "important" ? (
+                <NavHoverArrow />
+              ) : null}
               {item.action === "search" ? (
                 <div
                   className="ml-auto flex h-[25px] w-[37px] shrink-0 items-center justify-center rounded-full bg-[#eceff4]/75 mr-[1px] border border-[#eee8ef]"
@@ -666,7 +684,7 @@ export function Sidebar({
               onMouseEnter={() => {
                 onSidebarHoverStart?.({ kind: "list", listId: list.id });
               }}
-              className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[7px] ${getListRowClassName(list.id)}`}
+              className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[9px] transition-[background-color] duration-200 ${getListRowClassName(list.id)}`}
             >
               <div className="flex min-w-0 flex-1 items-center gap-2 px-4 text-left text-sm text-zinc-800 dark:text-zinc-50">
                 {editingListId === list.id ? (
@@ -847,7 +865,7 @@ export function Sidebar({
 
       <SearchModal
         open={isSearchOpen}
-        tasks={isSearchOpen ? searchTasks : []}
+        tasks={searchTasks}
         onClose={() => setIsSearchOpen(false)}
         onSelectTask={onSelectSearchTask}
         onToggleTask={onToggleTask}

@@ -350,6 +350,9 @@ export function TodoApp({
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
+  const [suppressListSelectionHighlightId, setSuppressListSelectionHighlightId] =
+    useState<string | null>(null);
+  const listSelectionHighlightTimerRef = useRef<number | null>(null);
   const [sidebarHoverPreview, setSidebarHoverPreview] =
     useState<SidebarHoverPreview | null>(null);
   const sidebarHoverPreviewRef = useRef<SidebarHoverPreview | null>(null);
@@ -805,8 +808,17 @@ export function TodoApp({
     setActiveView((current) => (current === "calendar" ? null : current));
   }, [pathname]);
 
+  function clearListSelectionHighlightDelay() {
+    if (listSelectionHighlightTimerRef.current !== null) {
+      window.clearTimeout(listSelectionHighlightTimerRef.current);
+      listSelectionHighlightTimerRef.current = null;
+    }
+    setSuppressListSelectionHighlightId(null);
+  }
+
   function selectList(listId: string) {
     leaveCalendarRoute();
+    clearListSelectionHighlightDelay();
     setActiveView(null);
     setSelectedLabelId(null);
     setSelectedListId(listId);
@@ -953,6 +965,17 @@ export function TodoApp({
     setSelectedLabelId(null);
     setSelectedListId(list.id);
     setSelectedTaskId(null);
+    setSuppressListSelectionHighlightId(list.id);
+
+    if (listSelectionHighlightTimerRef.current !== null) {
+      window.clearTimeout(listSelectionHighlightTimerRef.current);
+    }
+    listSelectionHighlightTimerRef.current = window.setTimeout(() => {
+      listSelectionHighlightTimerRef.current = null;
+      setSuppressListSelectionHighlightId((current) =>
+        current === list.id ? null : current,
+      );
+    }, 150);
   }
 
   async function renameList(listId: string, name: string) {
@@ -1601,6 +1624,9 @@ export function TodoApp({
     return () => {
       cancelListCalendarClose();
       cancelSidebarHoverClear();
+      if (listSelectionHighlightTimerRef.current !== null) {
+        window.clearTimeout(listSelectionHighlightTimerRef.current);
+      }
     };
   }, [cancelListCalendarClose, cancelSidebarHoverClear]);
 
@@ -1638,6 +1664,7 @@ export function TodoApp({
           searchTasks={searchTasks}
           calendarTasks={calendarTasks}
           selectedListId={selectedListId}
+          suppressListSelectionHighlightId={suppressListSelectionHighlightId}
           selectedLabelId={selectedLabelId}
           isTodaySelected={activeView === "today"}
           // isNext7DaysSelected={activeView === "next7days"}

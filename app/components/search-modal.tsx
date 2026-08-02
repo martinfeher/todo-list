@@ -29,6 +29,7 @@ type SearchModalProps = {
 
 const SEARCH_RESULT_LIMIT = 50;
 const SEARCH_QUERY_SAVE_MS = 400;
+const SEARCH_MODAL_ANIMATION_MS = 300;
 const detailsCache = new Map<string, string>();
 
 type SearchScope = "all" | "names" | "content";
@@ -288,6 +289,8 @@ export function SearchModal({
   const [activeIndex, setActiveIndex] = useState(-1);
   const [detailsVersion, setDetailsVersion] = useState(0);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [isMounted, setIsMounted] = useState(open);
+  const [isEntered, setIsEntered] = useState(false);
   const deferredQuery = useDeferredValue(query);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultRefs = useRef<(HTMLLIElement | null)[]>([]);
@@ -297,6 +300,24 @@ export function SearchModal({
   const isFiltering = query !== deferredQuery;
 
   queryRef.current = query;
+
+  useEffect(() => {
+    if (open) {
+      setIsMounted(true);
+      const frame = window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          setIsEntered(true);
+        });
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    setIsEntered(false);
+    const timeout = window.setTimeout(() => {
+      setIsMounted(false);
+    }, SEARCH_MODAL_ANIMATION_MS);
+    return () => window.clearTimeout(timeout);
+  }, [open]);
 
   function focusSearchInputSelectAll() {
     const input = inputRef.current;
@@ -310,8 +331,8 @@ export function SearchModal({
   }
 
   const searchIndex = useMemo(
-    () => (open ? buildSearchIndex(tasks) : []),
-    [open, tasks, detailsVersion],
+    () => (isMounted ? buildSearchIndex(tasks) : []),
+    [isMounted, tasks, detailsVersion],
   );
 
   const results = useMemo(
@@ -331,13 +352,16 @@ export function SearchModal({
   }, [activeIndex, results]);
 
   useEffect(() => {
-    if (!open) {
+    if (!isMounted) {
       setSearchScope("all");
       setActiveIndex(-1);
       setDetailsVersion(0);
       setIsLoadingDetails(false);
-      return;
     }
+  }, [isMounted]);
+
+  useEffect(() => {
+    if (!open) return;
 
     let cancelled = false;
 
@@ -490,11 +514,12 @@ export function SearchModal({
       }
     }
   }
-  if (!open) return null;
+  if (!isMounted) return null;
 
   const trimmedQuery = query.trim();
   const highlightQuery = deferredQuery.trim();
   const previewTask = activeIndex >= 0 ? (results[activeIndex] ?? null) : null;
+  const unblurCompleted = Boolean(previewTask?.completed);
   const showSplitLayout = trimmedQuery.length > 0 && results.length > 0;
   const emptyStateMessage =
     searchScope === "names"
@@ -505,7 +530,9 @@ export function SearchModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-[12vh]"
+      className={`search-modal-overlay fixed inset-0 z-50 flex items-start justify-center p-4 pt-[8vh] ${
+        isEntered ? "is-entered" : ""
+      }`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onClose();
@@ -516,7 +543,9 @@ export function SearchModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="search-modal-title"
-        className="flex max-h-[min(75vh,600px)] w-full min-h-[640px] max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-zinc-900"
+        className={`search-modal-panel flex max-h-[min(75vh,600px)] w-full min-h-[640px] max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-[0_24px_80px_rgba(0,0,0,0.18)] dark:bg-zinc-900 ${
+          isEntered ? "is-entered" : ""
+        }`}
       >
         <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <h2 id="search-modal-title" className="sr-only">
@@ -609,8 +638,10 @@ export function SearchModal({
                             role="option"
                             aria-selected={index === activeIndex}
                             onMouseEnter={() => setActiveIndex(index)}
-                            className={`flex min-h-11 cursor-pointer items-center gap-3 border-b border-zinc-100 px-4 dark:border-zinc-800 ${
-                              task.completed ? "blur-[1px]" : ""
+                            className={`flex min-h-11 cursor-pointer! items-center gap-3 border-b border-zinc-100 px-4 transition-[filter] duration-150 dark:border-zinc-800 ${
+                              task.completed && !unblurCompleted
+                                ? "blur-[1px]"
+                                : ""
                             } ${
                               index === activeIndex
                                 ? "bg-zinc-100 dark:bg-zinc-800"

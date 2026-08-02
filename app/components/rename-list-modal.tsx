@@ -11,6 +11,8 @@ type RenameListModalProps = {
   onCancel: () => void;
 };
 
+const LIST_MODAL_ANIMATION_MS = 200;
+
 export function RenameListModal({
   open,
   title = "Rename list",
@@ -20,7 +22,27 @@ export function RenameListModal({
   onCancel,
 }: RenameListModalProps) {
   const [name, setName] = useState(initialName);
+  const [isMounted, setIsMounted] = useState(open);
+  const [isEntered, setIsEntered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setIsMounted(true);
+      const frame = window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          setIsEntered(true);
+        });
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    setIsEntered(false);
+    const timeout = window.setTimeout(() => {
+      setIsMounted(false);
+    }, LIST_MODAL_ANIMATION_MS);
+    return () => window.clearTimeout(timeout);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -38,11 +60,13 @@ export function RenameListModal({
     onConfirm(name.trim());
   }
 
-  if (!open) return null;
+  if (!isMounted) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className={`list-modal-overlay fixed inset-0 z-50 flex items-center justify-center p-4 ${
+        isEntered ? "is-entered" : ""
+      }`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {
           onCancel();
@@ -75,14 +99,14 @@ export function RenameListModal({
           <button
             type="button"
             onClick={onCancel}
-            className="h-[35px] rounded-md px-4 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="h-[35px] rounded-md px-4 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 cursor-pointer!"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!name.trim()}
-            className="h-[35px] rounded-md bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="h-[35px] rounded-md bg-zinc-900 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200 cursor-pointer!"
           >
             {confirmLabel}
           </button>

@@ -59,14 +59,14 @@ export function ConfirmModal({
           <button
             type="button"
             onClick={onCancel}
-            className="h-[35px] rounded-md px-4 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 cursor-pointer"
+            className="h-[35px] rounded-md px-4 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800 cursor-pointer!"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="h-[35px] rounded-md bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700"
+            className="h-[35px] rounded-md bg-red-600 px-4 text-sm font-medium text-white transition-colors hover:bg-red-700 cursor-pointer!"
           >
             {confirmLabel}
           </button>
