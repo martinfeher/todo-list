@@ -15,6 +15,7 @@ type CalendarPanelProps = {
   tasks: TaskListItem[];
   lists: TodoList[];
   completingTaskIds: Set<string>;
+  checkAnimatingTaskIds?: Set<string>;
   selectedTaskId: string | null;
   onToggleTask: (taskId: string) => void;
   onSelectTask: (taskId: string) => void;
@@ -666,6 +667,7 @@ export function CalendarPanel({
   tasks,
   lists,
   completingTaskIds,
+  checkAnimatingTaskIds,
   selectedTaskId,
   onToggleTask,
   onSelectTask,
@@ -692,6 +694,7 @@ export function CalendarPanel({
           tasks={tasks}
           lists={lists}
           completingTaskIds={completingTaskIds}
+          checkAnimatingTaskIds={checkAnimatingTaskIds}
           selectedTaskId={selectedTaskId}
           embedded
           showHeader={false}

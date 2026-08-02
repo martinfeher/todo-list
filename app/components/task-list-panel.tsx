@@ -175,6 +175,7 @@ type TaskListPanelProps = {
   tasks: TaskListItem[];
   lists: TodoList[];
   completingTaskIds: Set<string>;
+  checkAnimatingTaskIds?: Set<string>;
   selectedTaskId: string | null;
   expanded?: boolean;
   panelWidth?: number;
@@ -225,6 +226,7 @@ export function TaskListPanel({
   tasks,
   lists,
   completingTaskIds,
+  checkAnimatingTaskIds,
   selectedTaskId,
   expanded = false,
   panelWidth,
@@ -1120,6 +1122,7 @@ export function TaskListPanel({
           task={task}
           depth={depth}
           isCompleting={completingTaskIds.has(task.id)}
+          isCheckAnimating={checkAnimatingTaskIds?.has(task.id) ?? false}
           selectedTaskId={selectedTaskId}
           editingTaskId={editingTaskId}
           titleDraft={titleDraft}

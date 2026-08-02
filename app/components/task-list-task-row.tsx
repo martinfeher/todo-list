@@ -3,8 +3,10 @@
 import type { RefObject } from "react";
 import { BiCalendar } from "react-icons/bi";
 import { InteractIcon } from "./line-control-icons";
-import { TaskCompletedIndicator } from "./task-completed-indicator";
-import { TaskCompletionCheckbox } from "./task-completion-checkbox";
+import {
+  CHECKED_ROW_DIM_MS,
+  TaskCompletionCheckbox,
+} from "./task-completion-checkbox";
 import { TaskDatePicker } from "./task-date-picker";
 import {
   TaskRowContextMenu,
@@ -22,6 +24,7 @@ type TaskListTaskRowProps = {
   task: TaskListItem;
   depth?: number;
   isCompleting?: boolean;
+  isCheckAnimating?: boolean;
   selectedTaskId: string | null;
   editingTaskId: string | null;
   titleDraft: string;
@@ -103,6 +106,7 @@ export function TaskListTaskRow({
   task,
   depth = 0,
   isCompleting = false,
+  isCheckAnimating = false,
   selectedTaskId,
   editingTaskId,
   titleDraft,
@@ -172,57 +176,69 @@ export function TaskListTaskRow({
   const basePaddingLeft = useWiderRowPadding ? 15 : 5;
   const rowPaddingLeft = basePaddingLeft + depth * SUBTASK_INDENT_PX;
   const isSelected = task.id === selectedTaskId;
-
-  if (isCompleting) {
-    return (
-      <li
-        data-task-id={task.id}
-        aria-label={`${task.name} completed`}
-        className="flex min-h-[35px] items-center gap-2 border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900"
-        style={{ paddingLeft: rowPaddingLeft }}
-      >
-        {showDragHandle ? <span className="size-[19px] shrink-0" aria-hidden /> : null}
-        <TaskCompletedIndicator />
-      </li>
-    );
-  }
+  const hideDueDate = isCheckAnimating || isCompleting;
+  const checkedContentStyle = hideDueDate
+    ? "opacity-50 blur-[1px]"
+    : "opacity-100 blur-none";
+  const dimTransition = `opacity ${CHECKED_ROW_DIM_MS}ms ease-out, filter ${CHECKED_ROW_DIM_MS}ms ease-out`;
 
   return (
     <li
       data-task-id={task.id}
       aria-current={task.id === selectedTaskId ? "true" : undefined}
-      onClick={() => onTaskClick(task)}
-      onMouseEnter={onTaskHoverStart}
-      onMouseLeave={onTaskHoverEnd}
-      onContextMenu={(event) => onTaskContextMenu(event, task)}
+      aria-label={isCompleting ? `${task.name} completed` : undefined}
+      onClick={isCompleting ? undefined : () => onTaskClick(task)}
+      onMouseEnter={isCompleting ? undefined : onTaskHoverStart}
+      onMouseLeave={isCompleting ? undefined : onTaskHoverEnd}
+      onContextMenu={
+        isCompleting ? undefined : (event) => onTaskContextMenu(event, task)
+      }
       onPointerDown={
-        showDragHandle
+        !isCompleting && showDragHandle
           ? (event) => onTaskDragStart(event, task.id)
           : undefined
       }
-      className={`group flex min-h-[35px] items-center rounded-r-[3px] border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 cursor-pointer ${
-        showDragHandle ? "touch-none" : ""
-      } ${
-        isSelected
-          ? "bg-[#e9ebee]/50 hover:bg-[#e9ebee]/80"
-          : "hover:bg-[#faf6ff]"
+      className={`group flex min-h-[35px] items-center rounded-r-[3px] border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 ${
+        isCompleting ? "" : "cursor-pointer"
+      } ${showDragHandle && !isCompleting ? "touch-none" : ""} ${
+        hideDueDate
+          ? "bg-white dark:bg-zinc-950"
+          : isSelected
+            ? "bg-[#e9ebee]/50 hover:bg-[#e9ebee]/80"
+            : "hover:bg-[#faf6ff]"
       }`}
-      style={{ paddingLeft: rowPaddingLeft }}
+      style={{
+        paddingLeft: rowPaddingLeft,
+        filter: hideDueDate ? "brightness(0.95)" : "brightness(1)",
+        transition: `filter ${CHECKED_ROW_DIM_MS}ms ease-out`,
+      }}
     >
       {showDragHandle ? (
         <span
           aria-hidden="true"
-          className="flex size-[19px] ml-[2px] mr-[1px] shrink-0 cursor-move items-center justify-center transition-opacity group-hover:opacity-100"
+          className={`flex size-[19px] ml-[2px] mr-[1px] shrink-0 cursor-move items-center justify-center ${
+            hideDueDate ? "" : "group-hover:opacity-100"
+          } ${checkedContentStyle}`}
+          style={{ transition: dimTransition }}
         >
           <InteractIcon className="size-3.5 text-[#c3c6cc] group-hover:text-[#7e828b]" />
         </span>
       ) : null}
 
       <TaskCompletionCheckbox
-        checked={task.completed}
-        onChange={() => onToggleTask(task.id)}
+        variant="box"
+        checkKey={task.id}
+        animateCheck={isCheckAnimating}
+        checked={task.completed || isCheckAnimating || isCompleting}
+        onChange={
+          isCompleting ? () => {} : () => onToggleTask(task.id)
+        }
         onClick={(event) => event.stopPropagation()}
-        aria-label={`Mark ${task.name} complete`}
+        aria-label={
+          isCompleting
+            ? `${task.name} completed`
+            : `Mark ${task.name} complete`
+        }
       />
 
       {editingTaskId === task.id ? (
@@ -237,7 +253,10 @@ export function TaskListTaskRow({
           className="min-w-0 flex-1 ml-2 bg-transparent text-sm text-zinc-900 outline-none dark:text-zinc-50"
         />
       ) : (
-        <div className="min-w-0 flex-1 ml-2">
+        <div
+          className={`min-w-0 flex-1 ml-2 ${checkedContentStyle}`}
+          style={{ transition: dimTransition }}
+        >
           <span className="block truncate text-left text-sm text-zinc-700 dark:text-zinc-50">
             {task.name}
           </span>
@@ -249,6 +268,7 @@ export function TaskListTaskRow({
         </div>
       )}
 
+      {!hideDueDate ? (
       <div className="relative ml-auto flex h-7 min-w-11 shrink-0 items-center justify-end gap-1.5 pl-2">
         {task.labels.length > 0 ? (
           <TaskLabelPills labels={task.labels} className="max-w-[140px]" />
@@ -401,6 +421,7 @@ export function TaskListTaskRow({
           </div>
         </div>
       </div>
+      ) : null}
     </li>
   );
 }

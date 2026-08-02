@@ -1,12 +1,22 @@
 "use client";
 
-import type { MouseEvent, SVGProps } from "react";
+import type { CSSProperties, MouseEvent, SVGProps } from "react";
 
 const CHECKMARK_OUTLINE_CHECK_PATH =
   "m14 21.414l-5-5.001L10.413 15L14 18.586L21.585 11L23 12.415z";
 
 const CHECKMARK_OUTLINE_CIRCLE_PATH =
   "M16 2a14 14 0 1 0 14 14A14 14 0 0 0 16 2m0 26a12 12 0 1 1 12-12a12 12 0 0 1-12 12";
+
+export const CHECKMARK_HIDE_MS = 950;
+export const CHECKMARK_HIDE_FADE_MS = 200;
+/** Brightness/blur dim on the checked task row. */
+export const CHECKED_ROW_DIM_MS = 400;
+const checkStartTimes = new Map<string, number>();
+
+export function clearCheckboxCheckStart(checkKey: string) {
+  checkStartTimes.delete(checkKey);
+}
 
 function CheckmarkOutlineIcon({
   className,
@@ -33,8 +43,12 @@ function CheckmarkOutlineIcon({
 type TaskCompletionCheckboxProps = {
   checked: boolean;
   onChange: () => void;
-  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  onClick?: (event: MouseEvent<HTMLButtonElement | HTMLInputElement>) => void;
   className?: string;
+  variant?: "outline" | "box";
+  checkKey?: string;
+  /** Only the actively checking box should animate (avoids animating the next row). */
+  animateCheck?: boolean;
   "aria-label"?: string;
 };
 
@@ -43,8 +57,60 @@ export function TaskCompletionCheckbox({
   onChange,
   onClick,
   className = "",
+  variant = "outline",
+  checkKey,
+  animateCheck = false,
   "aria-label": ariaLabel,
 }: TaskCompletionCheckboxProps) {
+  if (variant === "box") {
+    if (checkKey) {
+      if (checked) {
+        if (!checkStartTimes.has(checkKey)) {
+          checkStartTimes.set(checkKey, Date.now());
+        }
+      } else {
+        checkStartTimes.delete(checkKey);
+      }
+    }
+
+    const startedAt = checkKey ? checkStartTimes.get(checkKey) : undefined;
+    const elapsedMs = startedAt != null ? Date.now() - startedAt : 0;
+    const hideDelayMs =
+      checked && startedAt != null
+        ? Math.max(0, CHECKMARK_HIDE_MS - elapsedMs)
+        : CHECKMARK_HIDE_MS;
+    const checkHidden =
+      checked && startedAt != null && elapsedMs >= CHECKMARK_HIDE_MS;
+
+    return (
+      <div
+        className={`checkbox-wrapper-29 shrink-0 ${
+          animateCheck ? "animate-check" : ""
+        } ${checkHidden ? "check-hidden" : ""} ${className}`}
+        style={
+          {
+            "--check-hide-delay": `${hideDelayMs}ms`,
+          } as CSSProperties
+        }
+        onClick={(event) => event.stopPropagation()}
+      >
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            className="checkbox__input"
+            checked={checked}
+            aria-label={ariaLabel}
+            onChange={onChange}
+            onClick={(event) => {
+              onClick?.(event);
+            }}
+          />
+          <span className="checkbox__label" />
+        </label>
+      </div>
+    );
+  }
+
   return (
     <button
       type="button"

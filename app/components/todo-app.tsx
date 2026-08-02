@@ -30,6 +30,12 @@ import { plainTextToTaskDetails } from "./calendar-add-task-popover";
 import { TaskDetailsPanel } from "./task-details-panel";
 import { PanelResizeHandle } from "./panel-resize-handle";
 import { TaskListPanel } from "./task-list-panel";
+import {
+  CHECKED_ROW_DIM_MS,
+  CHECKMARK_HIDE_FADE_MS,
+  CHECKMARK_HIDE_MS,
+  clearCheckboxCheckStart,
+} from "./task-completion-checkbox";
 import { mergeReorderedPinnedTasks, mergeReorderedUnpinnedTasks } from "./task-reorder";
 import { AppFontSwitcher } from "./app-font-switcher";
 import { UndoButton } from "./undo-button";
@@ -151,7 +157,16 @@ function withPinnedDefaults(tasksByList: Record<string, Task[]>) {
 }
 
 const UNDO_VISIBLE_MS = 7000;
-const COMPLETION_DISPLAY_MS = 2000;
+const CHECKBOX_COMPLETE_ANIMATION_MS = 280;
+/** Remove the row after checkmark hide and row dim both finish. */
+const COMPLETION_REMOVE_MS = Math.max(
+  CHECKMARK_HIDE_MS + CHECKMARK_HIDE_FADE_MS,
+  CHECKED_ROW_DIM_MS,
+);
+const COMPLETION_DISPLAY_MS = Math.max(
+  0,
+  COMPLETION_REMOVE_MS - CHECKBOX_COMPLETE_ANIMATION_MS,
+);
 
 function startOfDay(date: Date) {
   const next = new Date(date);
@@ -364,6 +379,9 @@ export function TodoApp({
   );
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
   const [completingTaskIds, setCompletingTaskIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [checkAnimatingTaskIds, setCheckAnimatingTaskIds] = useState<Set<string>>(
     () => new Set(),
   );
   const undoTimerRef = useRef<number | null>(null);
@@ -761,7 +779,15 @@ export function TodoApp({
   }, []);
 
   const removeCompletingTask = useCallback((taskId: string) => {
+    clearCheckboxCheckStart(taskId);
     setCompletingTaskIds((current) => {
+      if (!current.has(taskId)) return current;
+
+      const next = new Set(current);
+      next.delete(taskId);
+      return next;
+    });
+    setCheckAnimatingTaskIds((current) => {
       if (!current.has(taskId)) return current;
 
       const next = new Set(current);
@@ -1120,14 +1146,12 @@ export function TodoApp({
     const completed = !task.completed;
 
     if (completed) {
-      if (completingTaskIds.has(taskId)) return;
+      if (completingTaskIds.has(taskId) || checkAnimatingTaskIds.has(taskId)) {
+        return;
+      }
 
+      setCheckAnimatingTaskIds((current) => new Set(current).add(taskId));
       setCompletingTaskIds((current) => new Set(current).add(taskId));
-      scheduleUndo({
-        taskId,
-        listId,
-        taskName: task.name,
-      });
 
       if (selectedTaskId === taskId) {
         setSelectedTaskId(null);
@@ -1135,8 +1159,22 @@ export function TodoApp({
 
       clearCompletionTimer(taskId);
       completionTimerRef.current[taskId] = window.setTimeout(() => {
-        void finalizeTaskCompletion(taskId, listId);
-      }, COMPLETION_DISPLAY_MS);
+        setCheckAnimatingTaskIds((current) => {
+          if (!current.has(taskId)) return current;
+          const next = new Set(current);
+          next.delete(taskId);
+          return next;
+        });
+        scheduleUndo({
+          taskId,
+          listId,
+          taskName: task.name,
+        });
+
+        completionTimerRef.current[taskId] = window.setTimeout(() => {
+          void finalizeTaskCompletion(taskId, listId);
+        }, COMPLETION_DISPLAY_MS);
+      }, CHECKBOX_COMPLETE_ANIMATION_MS);
       return;
     }
 
@@ -1693,6 +1731,7 @@ export function TodoApp({
             tasks={calendarTasks}
             lists={lists}
             completingTaskIds={completingTaskIds}
+            checkAnimatingTaskIds={checkAnimatingTaskIds}
             selectedTaskId={selectedTaskId}
             onToggleTask={toggleTask}
             onSelectTask={setSelectedTaskId}
@@ -1720,6 +1759,7 @@ export function TodoApp({
                 tasks={taskListItems}
                 lists={lists}
                 completingTaskIds={completingTaskIds}
+                checkAnimatingTaskIds={checkAnimatingTaskIds}
                 selectedTaskId={selectedTaskId}
                 panelWidth={taskListWidth}
                 expanded={false}
@@ -1804,6 +1844,7 @@ export function TodoApp({
               tasks={taskListItems}
               lists={lists}
               completingTaskIds={completingTaskIds}
+              checkAnimatingTaskIds={checkAnimatingTaskIds}
               selectedTaskId={selectedTaskId}
               expanded
               showAddTask={
