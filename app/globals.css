@@ -310,6 +310,16 @@ body {
   }
 }
 
+@keyframes list-name-hover-arrow-in {
+  from {
+    right: 20px;
+  }
+
+  to {
+    right: 12px;
+  }
+}
+
 .nav-hover-arrow {
   opacity: 0;
   transform: translateX(0);
@@ -320,11 +330,22 @@ body {
   animation: nav-hover-arrow-in 400ms ease-out forwards;
 }
 
+.list-name-hover-arrow {
+  right: 20px;
+  filter: brightness(1.4);
+  animation: list-name-hover-arrow-in 0.3s ease-in forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .group:hover .nav-hover-arrow {
     animation: none;
     opacity: 1;
     transform: translateX(20px);
+  }
+
+  .list-name-hover-arrow {
+    animation: none;
+    right: 12px;
   }
 }
 

@@ -236,21 +236,17 @@ export function Sidebar({
     const isHovered =
       sidebarHoverPreview?.kind === "list" &&
       sidebarHoverPreview.listId === listId;
-    const isAnySidebarHover = sidebarHoverPreview !== null;
 
-    if (isHovered) {
-      return "border-r border-[#cfcfcf] bg-[#e9ebee]";
-    }
-
+    // Keep selected background even while previewing another list name.
     if (isSelected) {
-      if (isAnySidebarHover && !isHovered) {
-        return "border-r border-transparent bg-[#e9ebee]/50 dark:bg-zinc-800";
-      }
-
       return "border-r border-transparent bg-[#e9ebee]/50 dark:bg-zinc-800";
     }
 
-    return "border-r-2 border-transparent hover:bg-zinc-200/60 dark:hover:bg-zinc-800/60";
+    if (isHovered) {
+      return "bg-[#f0f0f0]";
+    }
+
+    return "border-r-2 border-transparent hover:bg-zinc-200/50 dark:hover:bg-zinc-800/60";
   }
 
   function getNavItemClassName(
@@ -675,18 +671,37 @@ export function Sidebar({
                 style={{ top: dropIndicatorTop }}
               />
             )}
-            {orderedLists.map((list) => (
+            {orderedLists.map((list) => {
+              const isNameHovered =
+                sidebarHoverPreview?.kind === "list" &&
+                sidebarHoverPreview.listId === list.id;
+              const isSelectedRow =
+                isListSelected(list.id) &&
+                list.id !== suppressListSelectionHighlightId;
+              const dimOtherLists =
+                sidebarHoverPreview?.kind === "list" &&
+                !isNameHovered &&
+                !isSelectedRow;
+
+              return (
             <div
               key={list.id}
               data-list-id={list.id}
               onPointerDown={(event) => handleListPointerDown(event, list.id)}
               onClick={() => handleListClick(list.id)}
-              onMouseEnter={() => {
-                onSidebarHoverStart?.({ kind: "list", listId: list.id });
+              onMouseLeave={() => {
+                if (isNameHovered) {
+                  onSidebarHoverEnd?.();
+                }
               }}
-              className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[9px] transition-[background-color] duration-200 ${getListRowClassName(list.id)}`}
+              className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[9px] transition-[background-color,filter] ${
+                dimOtherLists ? "duration-400" : "duration-500"
+              } ${getListRowClassName(list.id)} ${
+                dimOtherLists ? "blur-[0.5px] brightness-[1.25]" : ""
+                // dimOtherLists ? "blur-[1px] brightness-[0.945]" : ""
+              }`}
             >
-              <div className="flex min-w-0 flex-1 items-center gap-2 px-4 text-left text-sm text-zinc-800 dark:text-zinc-50">
+              <div className="flex min-w-0 flex-1 items-center justify-between gap-2 px-4 text-left text-sm text-zinc-800 dark:text-zinc-50">
                 {editingListId === list.id ? (
                   <input
                     ref={listNameInputRef}
@@ -702,15 +717,31 @@ export function Sidebar({
                     className="min-w-0 flex-1 bg-transparent text-sm text-zinc-800 outline-none cursor-text dark:text-zinc-50"
                   />
                 ) : (
-                  <span
-                    className="min-w-0 flex-1 truncate cursor-pointer"
-                    onDoubleClick={(event) => {
-                      event.stopPropagation();
-                      startListNameEdit(list);
-                    }}
-                  >
-                    {list.name}
-                  </span>
+                  <div className="min-w-0 flex items-center">
+                    <div
+                      className="inline-block text-zinc-700 hover:text-[#404040] hover:bg-[#dfdfe6]/80 max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-[#6f6f71] hover:bg-[#dfdfe6]/80 max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-[#757687] hover:bg-[#dbdce2] max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-[#66688b] hover:bg-[#dedfe3] max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-[#626488] hover:bg-[#d7d8dd]  max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-blue-600  max-w-full truncate px-3 py-1 rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-blue-600  hover:bg-[#bec0c7] max-w-full truncate px-3 py-1 rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-zinc-900  hover:bg-[#bec0c7] max-w-full truncate px-3 py-1 rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-white hover:bg-[#e9e9e9] max-w-full truncate px-3 py-1 rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-zinc-900 hover:bg-[#8787e7] max-w-full truncate px-3 py-1 rounded-[7px] cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 max-w-full truncate px-3 py-1 rounded-[7px] cursor-pointer hover:bg-[#b6bbe7] hover:text-white dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      // className="inline-block text-zinc-700 hover:text-zinc-900 max-w-full truncate px-3 py-1 rounded-[7px] cursor-pointer hover:bg-[#e2e2e5] dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
+                      onMouseEnter={() => {
+                        onSidebarHoverStart?.({ kind: "list", listId: list.id });
+                      }}
+                      onDoubleClick={(event) => {
+                        event.stopPropagation();
+                        startListNameEdit(list);
+                      }}
+                    >
+                      {list.name}
+                    </div>
+                  </div>
                 )}
                 <span className="shrink-0 pr-1 text-xs tabular-nums text-zinc-400 transition-[padding,opacity] group-hover:opacity-0 dark:text-zinc-500">
                   {taskCountByListId[list.id] ?? 0}
@@ -721,25 +752,27 @@ export function Sidebar({
                 className="absolute right-1 top-1/2 -translate-y-1/2"
                 ref={openMenuListId === list.id ? menuRef : null}
               >
-                <button
-                  type="button"
-                  aria-label={`Open menu for ${list.name}`}
-                  aria-expanded={openMenuListId === list.id}
-                  className={`mr-1 flex size-7 items-center justify-center rounded-[8px] text-zinc-500 transition-opacity hover:bg-zinc-200/80 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-50 cursor-pointer ${
-                    openMenuListId === list.id
-                      ? "opacity-100"
-                      : "opacity-0 group-hover:opacity-100"
-                  }`}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setOpenMenuListId((current) =>
-                      current === list.id ? null : list.id,
-                    );
-                  }}
-                >
-                  <PiDotsThreeBold className="size-[19px] text-[#777777]" />
-                </button>
+                {!(isNameHovered && openMenuListId !== list.id) ? (
+                  <button
+                    type="button"
+                    aria-label={`Open menu for ${list.name}`}
+                    aria-expanded={openMenuListId === list.id}
+                    className={`mr-1 flex size-7 items-center justify-center rounded-[8px] text-zinc-500 transition-opacity hover:bg-zinc-200/80 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-50 cursor-pointer ${
+                      openMenuListId === list.id
+                        ? "opacity-100"
+                        : "opacity-0 group-hover:opacity-100"
+                    }`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenMenuListId((current) =>
+                        current === list.id ? null : list.id,
+                      );
+                    }}
+                  >
+                    <PiDotsThreeBold className="size-[19px] text-[#777777]" />
+                  </button>
+                ) : null}
 
                 {openMenuListId === list.id && (
                   <div className="absolute right-0 top-full z-20 mt-1 w-36 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
@@ -760,8 +793,22 @@ export function Sidebar({
                   </div>
                 )}
               </div>
+
+              {isNameHovered && openMenuListId !== list.id ? (
+                <span
+                  key={`list-arrow-${list.id}`}
+                  aria-hidden="true"
+                  className="list-name-hover-arrow pointer-events-none absolute top-1/2 inline-flex -translate-y-1/2"
+                >
+                  <LuArrowRight
+                    className="size-[13px] text-[#777777]"
+                    strokeWidth={2.25}
+                  />
+                </span>
+              ) : null}
             </div>
-          ))}
+              );
+            })}
           </div>
 
           <button

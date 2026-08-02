@@ -873,7 +873,7 @@ export function TodoApp({
     clearSidebarHoverTimerRef.current = window.setTimeout(() => {
       clearSidebarHoverTimerRef.current = null;
       setSidebarHoverPreview(null);
-    }, 120);
+    }, 400);
   }, [cancelSidebarHoverClear]);
 
   function commitSidebarHoverSelection() {
