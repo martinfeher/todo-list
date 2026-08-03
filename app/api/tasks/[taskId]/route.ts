@@ -71,16 +71,24 @@ export async function GET(_request: Request, context: RouteContext) {
 export async function PATCH(request: Request, context: RouteContext) {
   const { taskId } = await context.params;
 
-  let body: { completed?: boolean; important?: boolean };
+  let body: { completed?: boolean; important?: boolean; name?: string };
   try {
-    body = (await request.json()) as { completed?: boolean; important?: boolean };
+    body = (await request.json()) as {
+      completed?: boolean;
+      important?: boolean;
+      name?: string;
+    };
   } catch {
     return jsonWithCors({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  if (body.completed === undefined && body.important === undefined) {
+  if (
+    body.completed === undefined &&
+    body.important === undefined &&
+    body.name === undefined
+  ) {
     return jsonWithCors(
-      { error: "Provide completed and/or important" },
+      { error: "Provide completed, important, and/or name" },
       { status: 400 },
     );
   }
@@ -91,6 +99,15 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   if (body.important !== undefined && typeof body.important !== "boolean") {
     return jsonWithCors({ error: "important must be a boolean" }, { status: 400 });
+  }
+
+  if (body.name !== undefined) {
+    if (typeof body.name !== "string") {
+      return jsonWithCors({ error: "name must be a string" }, { status: 400 });
+    }
+    if (!body.name.trim()) {
+      return jsonWithCors({ error: "name cannot be empty" }, { status: 400 });
+    }
   }
 
   const existing = await prisma.task.findUnique({
@@ -107,6 +124,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     data: {
       ...(body.completed !== undefined ? { completed: body.completed } : {}),
       ...(body.important !== undefined ? { important: body.important } : {}),
+      ...(body.name !== undefined ? { name: body.name.trim() } : {}),
     },
     select: {
       id: true,

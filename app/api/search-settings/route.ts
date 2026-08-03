@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { jsonWithCors, optionsWithCors } from "@/lib/api-cors";
 import {
   getLastSearchQuery,
   setLastSearchQuery,
@@ -7,10 +7,10 @@ import {
 export async function GET() {
   try {
     const query = await getLastSearchQuery();
-    return NextResponse.json({ query });
+    return jsonWithCors({ query });
   } catch (error) {
     console.error("Failed to load last search query:", error);
-    return NextResponse.json(
+    return jsonWithCors(
       { error: "Failed to load last search query" },
       { status: 500 },
     );
@@ -23,7 +23,7 @@ export async function PUT(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return jsonWithCors({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   if (
@@ -31,19 +31,23 @@ export async function PUT(request: Request) {
     body === null ||
     typeof (body as { query?: unknown }).query !== "string"
   ) {
-    return NextResponse.json({ error: "Invalid query payload" }, { status: 400 });
+    return jsonWithCors({ error: "Invalid query payload" }, { status: 400 });
   }
 
   const { query } = body as { query: string };
 
   try {
     await setLastSearchQuery(query);
-    return NextResponse.json({ ok: true });
+    return jsonWithCors({ ok: true });
   } catch (error) {
     console.error("Failed to save last search query:", error);
-    return NextResponse.json(
+    return jsonWithCors(
       { error: "Failed to save last search query" },
       { status: 500 },
     );
   }
+}
+
+export async function OPTIONS() {
+  return optionsWithCors();
 }

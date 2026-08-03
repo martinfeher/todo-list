@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { jsonWithCors, optionsWithCors } from "@/lib/api-cors";
 import {
   cleanupOrphanedTaskImages,
   referencedTaskImagesChanged,
@@ -17,7 +17,7 @@ export async function PUT(request: Request, context: RouteContext) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return jsonWithCors({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   if (
@@ -25,7 +25,7 @@ export async function PUT(request: Request, context: RouteContext) {
     body === null ||
     typeof (body as { details?: unknown }).details !== "string"
   ) {
-    return NextResponse.json({ error: "Invalid details payload" }, { status: 400 });
+    return jsonWithCors({ error: "Invalid details payload" }, { status: 400 });
   }
 
   const { details } = body as { details: string };
@@ -36,11 +36,11 @@ export async function PUT(request: Request, context: RouteContext) {
   });
 
   if (!existing) {
-    return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    return jsonWithCors({ error: "Task not found" }, { status: 404 });
   }
 
   if (existing.details === details) {
-    return NextResponse.json({ ok: true, skipped: true });
+    return jsonWithCors({ ok: true, skipped: true });
   }
 
   await prisma.task.update({
@@ -52,5 +52,9 @@ export async function PUT(request: Request, context: RouteContext) {
     await cleanupOrphanedTaskImages(taskId, details);
   }
 
-  return NextResponse.json({ ok: true });
+  return jsonWithCors({ ok: true });
+}
+
+export function OPTIONS() {
+  return optionsWithCors();
 }
