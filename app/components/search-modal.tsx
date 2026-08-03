@@ -129,7 +129,10 @@ function highlightSearchMatch(text: string, query: string): ReactNode {
     }
 
     parts.push(
-      <span key={matchIndex} className="font-bold text-[#444444]">
+      <span
+        key={matchIndex}
+        className="rounded-[2px] bg-[#f5fcd0] dark:bg-zinc-700"
+      >
         {text.slice(matchIndex, matchIndex + lowerQuery.length)}
       </span>,
     );

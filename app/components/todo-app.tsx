@@ -398,6 +398,7 @@ export function TodoApp({
   const listCalendarReturnTaskIdRef = useRef<string | null>(null);
   const listCalendarCloseTimerRef = useRef<number | null>(null);
   const [taskListWidth, setTaskListWidth] = useState(DEFAULT_TASK_LIST_WIDTH);
+  const [hasResizedTaskList, setHasResizedTaskList] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const taskListWidthRef = useRef(taskListWidth);
   taskListWidthRef.current = taskListWidth;
@@ -421,6 +422,7 @@ export function TodoApp({
       const pointerId = event.pointerId;
       const handle = event.currentTarget;
       handle.setPointerCapture(pointerId);
+      setHasResizedTaskList(true);
 
       const onPointerMove = (moveEvent: PointerEvent) => {
         if (moveEvent.pointerId !== pointerId) return;
@@ -458,12 +460,38 @@ export function TodoApp({
     return () => observer.disconnect();
   }, [clampTaskListWidth]);
 
-  const displayedTaskId =
-    hoveredTaskId && hoveredTaskId !== selectedTaskId
-      ? hoveredTaskId
-      : selectedTaskId;
+  const displayedTaskId = (() => {
+    if (hoveredTaskId && hoveredTaskId !== selectedTaskId) {
+      return hoveredTaskId;
+    }
+
+    if (
+      sidebarHoverPreview?.kind === "today" ||
+      sidebarHoverPreview?.kind === "important"
+    ) {
+      const previewTasks = getVisibleTasks(
+        sidebarHoverPreview.kind,
+        null,
+        null,
+        lists,
+        tasksByList,
+      );
+      if (
+        selectedTaskId == null ||
+        !previewTasks.some((task) => task.id === selectedTaskId)
+      ) {
+        return previewTasks[0]?.id ?? null;
+      }
+    }
+
+    return selectedTaskId;
+  })();
   const isHoverPreview =
-    hoveredTaskId !== null && hoveredTaskId !== selectedTaskId;
+    (hoveredTaskId !== null && hoveredTaskId !== selectedTaskId) ||
+    ((sidebarHoverPreview?.kind === "today" ||
+      sidebarHoverPreview?.kind === "important") &&
+      displayedTaskId !== null &&
+      displayedTaskId !== selectedTaskId);
 
   const previewListId =
     sidebarHoverPreview?.kind === "list" ? sidebarHoverPreview.listId : null;
@@ -520,9 +548,7 @@ export function TodoApp({
                 selectedListId !== null),
   );
 
-  const showingCalendarMonth =
-    activeView === "calendar" &&
-    (sidebarHoverPreview == null || sidebarHoverPreview.kind === "calendar");
+  const showingCalendarMonth = displayedActiveView === "calendar";
 
   const selectedList = lists.find((list) => list.id === selectedListId) ?? null;
   const selectedLabel =
@@ -1050,14 +1076,22 @@ export function TodoApp({
 
     const targetListId =
       displayedListId ??
-      (displayedActiveView === "today" ? (lists[0]?.id ?? null) : null);
+      (displayedActiveView === "today" || displayedActiveView === "important"
+        ? (lists[0]?.id ?? null)
+        : null);
     if (!targetListId) return;
 
     const dueDateValue =
       displayedListId || displayedActiveView !== "today"
         ? null
         : getTodayDateValue();
+    const markImportant = displayedActiveView === "important";
     const task = await createTask(targetListId, name.trim(), dueDateValue);
+
+    if (markImportant) {
+      await updateTaskImportantInDb(task.id, true);
+    }
+
     const newTask: Task = {
       id: task.id,
       name: task.name,
@@ -1070,7 +1104,7 @@ export function TodoApp({
       dueTimeZone: "floating",
       priority: null,
       pinned: false,
-      important: false,
+      important: markImportant,
       parentId: null,
       labels: [],
     };
@@ -1080,7 +1114,7 @@ export function TodoApp({
       [targetListId]: [newTask, ...(current[targetListId] ?? [])],
     }));
 
-    if (activeView === "today") {
+    if (activeView === "today" || activeView === "important") {
       setSelectedTaskId(task.id);
     }
   }
@@ -1727,24 +1761,29 @@ export function TodoApp({
           sidebarHoverPreview={sidebarHoverPreview}
         />
         {showingCalendarMonth ? (
-          <CalendarPanel
-            tasks={calendarTasks}
-            lists={lists}
-            completingTaskIds={completingTaskIds}
-            checkAnimatingTaskIds={checkAnimatingTaskIds}
-            selectedTaskId={selectedTaskId}
-            onToggleTask={toggleTask}
-            onSelectTask={setSelectedTaskId}
-            onRenameTask={renameTask}
-            onSetTaskDueDate={setTaskDueDate}
-            onSetTaskDueTime={setTaskDueTime}
-            onSetTaskPriority={setTaskPriority}
-            onToggleTaskLabel={toggleTaskLabel}
-            onLabelsChanged={refreshLabels}
-            onMoveTaskToList={moveTaskToList}
-            onAddCalendarTask={addCalendarTask}
-            defaultListId={lists[0]?.id ?? null}
-          />
+          <div
+            className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
+            onMouseEnter={commitSidebarHoverSelection}
+          >
+            <CalendarPanel
+              tasks={calendarTasks}
+              lists={lists}
+              completingTaskIds={completingTaskIds}
+              checkAnimatingTaskIds={checkAnimatingTaskIds}
+              selectedTaskId={selectedTaskId}
+              onToggleTask={toggleTask}
+              onSelectTask={setSelectedTaskId}
+              onRenameTask={renameTask}
+              onSetTaskDueDate={setTaskDueDate}
+              onSetTaskDueTime={setTaskDueTime}
+              onSetTaskPriority={setTaskPriority}
+              onToggleTaskLabel={toggleTaskLabel}
+              onLabelsChanged={refreshLabels}
+              onMoveTaskToList={moveTaskToList}
+              onAddCalendarTask={addCalendarTask}
+              defaultListId={lists[0]?.id ?? null}
+            />
+          </div>
         ) : showRightPanel ? (
           <div
             ref={splitContainerRef}
@@ -1762,10 +1801,15 @@ export function TodoApp({
                 checkAnimatingTaskIds={checkAnimatingTaskIds}
                 selectedTaskId={selectedTaskId}
                 panelWidth={taskListWidth}
+                panelMaxWidth={
+                  hasResizedTaskList ? undefined : DEFAULT_TASK_LIST_WIDTH
+                }
                 expanded={false}
                 showAddTask={
                   displayedListId !== null ||
-                  (displayedActiveView === "today" && lists.length > 0)
+                  ((displayedActiveView === "today" ||
+                    displayedActiveView === "important") &&
+                    lists.length > 0)
                 }
                 isLabelFilter={displayedLabelId !== null}
                 listId={displayedListId}
@@ -1818,7 +1862,9 @@ export function TodoApp({
               {showTaskDetails && (
                 <div
                   className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-[filter] duration-200 ${
-                    isSidebarHoverPreview
+                    isSidebarHoverPreview &&
+                    sidebarHoverPreview?.kind !== "today" &&
+                    sidebarHoverPreview?.kind !== "important"
                       ? "pointer-events-none blur-[1.5px] brightness-[0.985]"
                       : ""
                   }`}
@@ -1849,7 +1895,9 @@ export function TodoApp({
               expanded
               showAddTask={
                 displayedListId !== null ||
-                (displayedActiveView === "today" && lists.length > 0)
+                ((displayedActiveView === "today" ||
+                  displayedActiveView === "important") &&
+                  lists.length > 0)
               }
               isLabelFilter={displayedLabelId !== null}
               listId={displayedListId}

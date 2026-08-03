@@ -86,10 +86,10 @@ function shouldStartListDrag(target: EventTarget | null) {
 }
 
 const itemClassName =
-  "flex mx-[6px] mb-px w-auto items-center rounded-[7px] text-left text-sm transition-colors cursor-pointer";
+  "flex mx-[6px] mb-px w-[236px] items-center rounded-[3px]  text-left text-sm transition-colors cursor-pointer";
 
 const completedItemClassName =
-  "flex mx-[4px] mb-px min-h-[44px] w-auto flex-col items-start justify-center gap-0 rounded-[7px] px-4 py-1 text-left text-sm transition-colors";
+  "flex mx-[4px] mb-px min-h-[44px] w-auto flex-col items-start justify-center gap-0 rounded-[3px]  px-4 py-1 text-left text-sm transition-colors";
 
 function getItemClassName(isSelected: boolean, baseClassName = itemClassName) {
   const heightClass =
@@ -108,7 +108,7 @@ function NavHoverArrow() {
       aria-hidden="true"
       className="nav-hover-arrow ml-auto inline-flex shrink-0"
     >
-      <LuArrowRight className="size-[12.6px]" strokeWidth={2.25} />
+      <LuArrowRight className="size-[12.6px] text-[#9f9f9f]" strokeWidth={2.25} />
     </span>
   );
 }
@@ -175,6 +175,8 @@ export function Sidebar({
     pointerId: number;
   } | null>(null);
   const suppressListClickRef = useRef(false);
+
+  const [activeText, setActiveText] = useState(false);
 
   useEffect(() => {
     setOrderedLists(lists);
@@ -257,20 +259,17 @@ export function Sidebar({
       (action === "today" && sidebarHoverPreview?.kind === "today") ||
       (action === "important" && sidebarHoverPreview?.kind === "important") ||
       (action === "calendar" && sidebarHoverPreview?.kind === "calendar");
-    const isAnySidebarHover = sidebarHoverPreview !== null;
+
+    // Match list-item hover-bg rules.
+    if (isSelected) {
+      return `${itemClassName} group h-[35px] bg-[#e9ebee]/50 font-medium text-[#111111] dark:bg-zinc-800 dark:text-zinc-50`;
+    }
 
     if (isHovered) {
-      return `${itemClassName} group h-[35px] w-full bg-[#e9ebee]/70 dark:bg-zinc-800/60`;
+      return `${itemClassName} group h-[35px] bg-[#f0f0f0]`;
     }
 
-    if (isSelected) {
-      if (isAnySidebarHover) {
-        return `${itemClassName} group h-[35px] w-full bg-[#e9ebee]/50 font-medium text-[#111111] dark:bg-zinc-800 dark:text-zinc-50`;
-      }
-      return `${getItemClassName(true)} group w-full`;
-    }
-
-    return `${getItemClassName(false)} group w-full`;
+    return `${itemClassName} group h-[35px] text-zinc-900 hover:bg-zinc-200/50 dark:text-zinc-50 dark:hover:bg-zinc-800/60`;
   }
 
   function cancelCalendarPreviewClose() {
@@ -556,65 +555,107 @@ export function Sidebar({
               : "text-[#7c92a0]";
 
             return (
+            item.action === "today" ||
+            item.action === "important" ||
             item.action === "calendar" ? (
-              <div
-                key={item.label}
-                ref={calendarNavRef}
-                onMouseEnter={() => {
-                  openCalendarPreview();
-                  onSidebarHoverStart?.({ kind: "calendar" });
-                }}
-                onMouseLeave={() => {
-                  scheduleCalendarPreviewClose();
-                  onSidebarHoverEnd?.();
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={onSelectCalendar}
-                  className={`${getNavItemClassName("calendar", isNavItemSelected)} !w-[236px] gap-2 px-4`}
-                >
-                  <BsCalendar3
-                    className={`size-[14px] shrink-0 ${navIconColor}`}
-                    aria-hidden="true"
-                  />
-                  {item.label}
-                  <NavHoverArrow />
-                </button>
-              </div>
-            ) : (
-            <button
+            (() => {
+              const isNavNameHovered =
+                (item.action === "today" &&
+                  sidebarHoverPreview?.kind === "today") ||
+                (item.action === "important" &&
+                  sidebarHoverPreview?.kind === "important") ||
+                (item.action === "calendar" &&
+                  sidebarHoverPreview?.kind === "calendar");
+              const showNavAccentBorder =
+                isNavNameHovered ||
+                (isNavItemSelected && sidebarHoverPreview === null);
+
+              return (
+            <div
               key={item.label}
-              type="button"
+              ref={item.action === "calendar" ? calendarNavRef : undefined}
+              role="button"
+              tabIndex={0}
               onClick={
                 item.action === "today"
                   ? onSelectToday
                   : item.action === "important"
                     ? onSelectImportant
-                    : item.action === "search"
-                      ? () => setIsSearchOpen(true)
-                      : undefined
+                    : onSelectCalendar
               }
-              onMouseEnter={
-                item.action === "today"
-                  ? () => onSidebarHoverStart?.({ kind: "today" })
-                  : item.action === "important"
-                    ? () => onSidebarHoverStart?.({ kind: "important" })
-                    : undefined
-              }
-              onMouseLeave={
-                item.action === "today" || item.action === "important"
-                  ? () => onSidebarHoverEnd?.()
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                if (item.action === "today") onSelectToday();
+                else if (item.action === "important") onSelectImportant();
+                else onSelectCalendar();
+              }}
+              onMouseLeave={() => {
+                if (isNavNameHovered) {
+                  if (item.action === "calendar") {
+                    scheduleCalendarPreviewClose();
+                  }
+                  onSidebarHoverEnd?.();
+                }
+              }}
+              className={`${getNavItemClassName(
+                item.action,
+                isNavItemSelected,
+              )} gap-2 px-4 rounded-r-[9px] ${
+                showNavAccentBorder
+                  ? "border-l-[2px] border-l-[#dadfdf]"
+                  : "border-l-[2px] border-l-transparent"
+              }`}
+            >
+              {item.action === "today" ? (
+                <TodayCalendarIcon
+                  className={`size-[19px] -ml-[2px] shrink-0 ${navIconColor}`}
+                />
+              ) : item.action === "important" ? (
+                <LuStar
+                  className={`size-[15px] shrink-0 ${navIconColor}`}
+                  aria-hidden="true"
+                />
+              ) : (
+                <BsCalendar3
+                  className={`size-[14px] shrink-0 ${navIconColor}`}
+                  aria-hidden="true"
+                />
+              )}
+              <span
+                className="inline-block max-w-full truncate rounded-full px-3 py-[3.5px] text-zinc-700 transition-all duration-300 cursor-pointer hover:bg-[#dfdfe6]/80 hover:text-[#404040] dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80"
+                onMouseEnter={() => {
+                  if (item.action === "calendar") {
+                    openCalendarPreview();
+                    onSidebarHoverStart?.({ kind: "calendar" });
+                    return;
+                  }
+                  onSidebarHoverStart?.(
+                    item.action === "today"
+                      ? { kind: "today" }
+                      : { kind: "important" },
+                  );
+                }}
+              >
+                {item.label}
+              </span>
+              {item.action === "calendar" ? <NavHoverArrow /> : null}
+            </div>
+              );
+            })()
+            ) : (
+            <button
+              key={item.label}
+              type="button"
+              onClick={
+                item.action === "search"
+                  ? () => setIsSearchOpen(true)
                   : undefined
               }
               className={
                 item.action === "search"
                   ? "mx-[6px] my-2 flex h-[35px] w-auto cursor-pointer items-center gap-2 self-stretch rounded-[7px] border border-[#e3e3e9] py-0 pl-3 pr-[3px] text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-50 dark:hover:bg-zinc-800/60"
-                  : item.action === "today"
-                    ? `${getNavItemClassName("today", isNavItemSelected)} gap-2 px-4`
-                    : item.action === "important"
-                      ? `${getNavItemClassName("important", isNavItemSelected)} gap-2 px-4`
-                      : `${getItemClassName(isNavItemSelected)} gap-2 px-4`
+                  : `${getItemClassName(isNavItemSelected)} gap-2 px-4`
               }
             >
               {item.action === "search" ? (
@@ -623,21 +664,7 @@ export function Sidebar({
                   aria-hidden="true"
                 />
               ) : null}
-              {item.action === "today" ? (
-                <TodayCalendarIcon
-                  className={`size-[19px] -ml-[2px] shrink-0 ${navIconColor}`}
-                />
-              ) : null}
-              {item.action === "important" ? (
-                <LuStar
-                  className={`size-[15px] shrink-0 ${navIconColor}`}
-                  aria-hidden="true"
-                />
-              ) : null}
               {item.label}
-              {item.action === "today" || item.action === "important" ? (
-                <NavHoverArrow />
-              ) : null}
               {item.action === "search" ? (
                 <div
                   className="ml-auto flex h-[25px] w-[37px] shrink-0 items-center justify-center rounded-full bg-[#eceff4]/75 mr-[1px] border border-[#eee8ef]"
@@ -694,11 +721,14 @@ export function Sidebar({
                   onSidebarHoverEnd?.();
                 }
               }}
-              className={`group relative flex h-[35px] items-center cursor-pointer mx-[6px] mb-px rounded-[9px] transition-[background-color,filter] ${
+              className={`group relative flex h-[35px] w-[236px] items-center cursor-pointer mx-[6px] mb-px rounded-[3px] transition-[background-color,filter] ${
                 dimOtherLists ? "duration-400" : "duration-500"
               } ${getListRowClassName(list.id)} ${
                 dimOtherLists ? "blur-[0.5px] brightness-[1.25]" : ""
-                // dimOtherLists ? "blur-[1px] brightness-[0.945]" : ""
+              } ${
+                isNameHovered || (isSelectedRow && sidebarHoverPreview === null)
+                  ? "border-l-[2px] border-l-[#dadfdf]"
+                  : "border-l-[2px] border-l-transparent"
               }`}
             >
               <div className="flex min-w-0 flex-1 items-center justify-between gap-2 px-4 text-left text-sm text-zinc-800 dark:text-zinc-50">
@@ -720,17 +750,6 @@ export function Sidebar({
                   <div className="min-w-0 flex items-center">
                     <div
                       className="inline-block text-zinc-700 hover:text-[#404040] hover:bg-[#dfdfe6]/80 max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-[#6f6f71] hover:bg-[#dfdfe6]/80 max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-[#757687] hover:bg-[#dbdce2] max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-[#66688b] hover:bg-[#dedfe3] max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-[#626488] hover:bg-[#d7d8dd]  max-w-full truncate px-3 py-[3.5px] rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-blue-600  max-w-full truncate px-3 py-1 rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-blue-600  hover:bg-[#bec0c7] max-w-full truncate px-3 py-1 rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-zinc-900  hover:bg-[#bec0c7] max-w-full truncate px-3 py-1 rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-white hover:bg-[#e9e9e9] max-w-full truncate px-3 py-1 rounded-full cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-zinc-900 hover:bg-[#8787e7] max-w-full truncate px-3 py-1 rounded-[7px] cursor-pointer dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 max-w-full truncate px-3 py-1 rounded-[7px] cursor-pointer hover:bg-[#b6bbe7] hover:text-white dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
-                      // className="inline-block text-zinc-700 hover:text-zinc-900 max-w-full truncate px-3 py-1 rounded-[7px] cursor-pointer hover:bg-[#e2e2e5] dark:bg-zinc-800/60 dark:hover:bg-zinc-800/80 transition-all duration-300"
                       onMouseEnter={() => {
                         onSidebarHoverStart?.({ kind: "list", listId: list.id });
                       }}
@@ -748,6 +767,14 @@ export function Sidebar({
                 </span>
               </div>
 
+              {isNameHovered && activeText ? (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-1/2 right-[41px] -translate-y-1/2 whitespace-nowrap text-[10px] text-zinc-350 dark:text-zinc-500"
+                >
+                  active
+                </div>
+              ) : null}
               <div
                 className="absolute right-1 top-1/2 -translate-y-1/2"
                 ref={openMenuListId === list.id ? menuRef : null}
@@ -837,6 +864,8 @@ export function Sidebar({
                   sidebarHoverPreview?.kind === "label" &&
                   sidebarHoverPreview.labelId === item.id;
                 const isSelected = selectedLabelId === item.id;
+                const showLabelAccentBorder =
+                  isHovered || (isSelected && sidebarHoverPreview === null);
 
                 return (
                 <button
@@ -850,8 +879,12 @@ export function Sidebar({
                     isHovered
                       ? `${itemClassName} h-[35px] bg-[#e9ebee]/70`
                       : getItemClassName(isSelected)
-                  } gap-2 pl-[16px] pr-2 text-[#5b5b5b] ${
+                  } gap-2 pl-[16px] pr-2 text-[#5b5b5b] rounded-r-[9px] ${
                     isSelected && !isHovered ? "" : "hover:text-[#777777]"
+                  } ${
+                    showLabelAccentBorder
+                      ? "border-l-[2px] border-l-[#dadfdf]"
+                      : "border-l-[2px] border-l-transparent"
                   }`}
                 >
                   <IoPricetagOutline

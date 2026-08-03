@@ -179,6 +179,7 @@ type TaskListPanelProps = {
   selectedTaskId: string | null;
   expanded?: boolean;
   panelWidth?: number;
+  panelMaxWidth?: number;
   embedded?: boolean;
   showHeader?: boolean;
   showAddTask?: boolean;
@@ -230,6 +231,7 @@ export function TaskListPanel({
   selectedTaskId,
   expanded = false,
   panelWidth,
+  panelMaxWidth,
   embedded = false,
   showHeader = true,
   showAddTask = false,
@@ -1224,7 +1226,12 @@ export function TaskListPanel({
     <section
       style={
         panelWidth != null
-          ? { width: panelWidth, minWidth: 300, flexShrink: 0 }
+          ? {
+              width: panelWidth,
+              minWidth: 300,
+              maxWidth: panelMaxWidth,
+              flexShrink: 0,
+            }
           : undefined
       }
       onMouseEnter={onPanelMouseEnter}
@@ -1235,7 +1242,7 @@ export function TaskListPanel({
           ? "flex min-h-0 flex-col"
           : embedded
             ? "w-[350px] border-r border-zinc-200 dark:border-zinc-800"
-            : "w-full min-w-[250px] border-r border-zinc-200 dark:border-zinc-800"
+            : "w-full max-w-[350px] min-w-[250px] border-r border-zinc-200 dark:border-zinc-800"
       }`}
     >
       {title ? (

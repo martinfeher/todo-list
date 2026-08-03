@@ -173,7 +173,7 @@ export function TaskListTaskRow({
     (openDatePickerTaskId === task.id || rowMenuView !== null);
 
   const priorityColor = getTaskPriorityColor(task.priority);
-  const basePaddingLeft = useWiderRowPadding ? 15 : 5;
+  const basePaddingLeft = useWiderRowPadding ? 22 : 5;
   const rowPaddingLeft = basePaddingLeft + depth * SUBTASK_INDENT_PX;
   const isSelected = task.id === selectedTaskId;
   const hideDueDate = isCheckAnimating || isCompleting;
@@ -198,7 +198,7 @@ export function TaskListTaskRow({
           ? (event) => onTaskDragStart(event, task.id)
           : undefined
       }
-      className={`group flex min-h-[35px] items-center rounded-r-[3px] border-b border-zinc-100 py-1 pr-2 dark:border-zinc-900 ${
+      className={`group flex min-h-[35px] items-center rounded-r-[3px] border-b border-zinc-100 py-1 pr-2 pl-[1px] dark:border-zinc-900 ${
         isCompleting ? "" : "cursor-pointer"
       } ${showDragHandle && !isCompleting ? "touch-none" : ""} ${
         hideDueDate
