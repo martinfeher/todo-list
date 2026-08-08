@@ -113,6 +113,7 @@ export async function POST(request: Request) {
         dueDate: task.dueDate ? task.dueDate.toISOString() : null,
         pinned: task.pinned,
         important: task.important,
+        priority: null,
         parentId: task.parentId,
         depth: 0,
         labels: [],

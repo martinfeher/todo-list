@@ -8,6 +8,7 @@ import type { TodoList } from "./todo-app";
 
 type CalendarAddTaskPopoverProps = {
   date: Date;
+  dueTimeMinutes?: number | null;
   lists: TodoList[];
   defaultListId: string | null;
   x: number;
@@ -20,6 +21,7 @@ type CalendarAddTaskPopoverProps = {
     dueDate: string;
     details: string;
     listId: string;
+    dueTimeMinutes?: number | null;
   }) => void | Promise<void>;
 };
 
@@ -37,6 +39,33 @@ function formatPopoverDate(date: Date) {
     day: "numeric",
     year: "numeric",
   }).format(date);
+}
+
+function formatPopoverDateTime(date: Date, dueTimeMinutes: number | null) {
+  const today = new Date();
+  const isToday =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate();
+  const dayLabel = isToday
+    ? "Today"
+    : new Intl.DateTimeFormat(undefined, {
+        weekday: "short",
+      }).format(date);
+  const dateLabel = new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+  }).format(date);
+
+  if (dueTimeMinutes === null || dueTimeMinutes === undefined) {
+    return `${dayLabel}, ${dateLabel}`;
+  }
+
+  const hours = Math.floor(dueTimeMinutes / 60);
+  const minutes = dueTimeMinutes % 60;
+  const timeLabel = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+
+  return `${dayLabel}, ${dateLabel}, ${timeLabel}`;
 }
 
 function escapeHtml(value: string) {
@@ -62,6 +91,7 @@ export function plainTextToTaskDetails(text: string) {
 
 export function CalendarAddTaskPopover({
   date,
+  dueTimeMinutes = null,
   lists,
   defaultListId,
   x,
@@ -85,6 +115,7 @@ export function CalendarAddTaskPopover({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const dueDate = toDateKey(date);
+  const heading = formatPopoverDateTime(date, dueTimeMinutes);
   const selectedList =
     lists.find((list) => list.id === selectedListId) ?? lists[0] ?? null;
 
@@ -173,6 +204,7 @@ export function CalendarAddTaskPopover({
         dueDate,
         details: content,
         listId: selectedListId,
+        dueTimeMinutes,
       });
       onClose();
     } finally {
@@ -184,7 +216,7 @@ export function CalendarAddTaskPopover({
     <div
       ref={popoverRef}
       role="dialog"
-      aria-label={`Add task for ${formatPopoverDate(date)}`}
+      aria-label={`Add task for ${heading}`}
       className="fixed z-50 w-[300px] overflow-visible rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
       style={{ left: position.left, top: position.top }}
       onClick={(event) => event.stopPropagation()}
@@ -197,7 +229,9 @@ export function CalendarAddTaskPopover({
                 New task
               </p>
               <p className="mt-0.5 text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                {formatPopoverDate(date)}
+                {dueTimeMinutes === null || dueTimeMinutes === undefined
+                  ? formatPopoverDate(date)
+                  : heading}
               </p>
             </div>
             <button

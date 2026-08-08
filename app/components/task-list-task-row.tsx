@@ -5,6 +5,7 @@ import { BiCalendar } from "react-icons/bi";
 import { InteractIcon } from "./line-control-icons";
 import {
   CHECKED_ROW_DIM_MS,
+  TASK_COMPLETE_ANIMATION_MS,
   TaskCompletionCheckbox,
 } from "./task-completion-checkbox";
 import { TaskDatePicker } from "./task-date-picker";
@@ -177,10 +178,14 @@ export function TaskListTaskRow({
   const rowPaddingLeft = basePaddingLeft + depth * SUBTASK_INDENT_PX;
   const isSelected = task.id === selectedTaskId;
   const hideDueDate = isCheckAnimating || isCompleting;
-  const checkedContentStyle = hideDueDate
-    ? "opacity-50 blur-[1px]"
-    : "opacity-100 blur-none";
-  const dimTransition = `opacity ${CHECKED_ROW_DIM_MS}ms ease-out, filter ${CHECKED_ROW_DIM_MS}ms ease-out`;
+  const checkedContentDim = hideDueDate ? "opacity-50" : "opacity-100";
+  const checkedTextStyle = hideDueDate
+    ? "text-zinc-400 dark:text-zinc-500"
+    : "text-zinc-700 dark:text-zinc-50";
+  const dimTransition = `color ${CHECKED_ROW_DIM_MS}ms ease-out, opacity ${CHECKED_ROW_DIM_MS}ms ease-out`;
+  const completeDurationStyle = {
+    "--task-complete-duration": `${TASK_COMPLETE_ANIMATION_MS}ms`,
+  } as React.CSSProperties;
 
   return (
     <li
@@ -199,18 +204,17 @@ export function TaskListTaskRow({
           : undefined
       }
       className={`group flex min-h-[35px] items-center rounded-r-[3px] border-b border-zinc-100 py-1 pr-2 pl-[1px] dark:border-zinc-900 ${
-        isCompleting ? "" : "cursor-pointer"
+        isCompleting ? "task-row-completing" : "cursor-pointer"
       } ${showDragHandle && !isCompleting ? "touch-none" : ""} ${
-        hideDueDate
-          ? "bg-white dark:bg-zinc-950"
+        isCompleting
+          ? ""
           : isSelected
             ? "bg-[#e9ebee]/50 hover:bg-[#e9ebee]/80"
             : "hover:bg-[#faf6ff]"
       }`}
       style={{
         paddingLeft: rowPaddingLeft,
-        filter: hideDueDate ? "brightness(0.95)" : "brightness(1)",
-        transition: `filter ${CHECKED_ROW_DIM_MS}ms ease-out`,
+        ...(isCompleting ? completeDurationStyle : {}),
       }}
     >
       {showDragHandle ? (
@@ -218,7 +222,7 @@ export function TaskListTaskRow({
           aria-hidden="true"
           className={`flex size-[19px] ml-[2px] mr-[1px] shrink-0 cursor-move items-center justify-center ${
             hideDueDate ? "" : "group-hover:opacity-100"
-          } ${checkedContentStyle}`}
+          } ${checkedContentDim}`}
           style={{ transition: dimTransition }}
         >
           <InteractIcon className="size-3.5 text-[#c3c6cc] group-hover:text-[#7e828b]" />
@@ -254,10 +258,13 @@ export function TaskListTaskRow({
         />
       ) : (
         <div
-          className={`min-w-0 flex-1 ml-2 ${checkedContentStyle}`}
+          className={`min-w-0 flex-1 ml-2 ${checkedContentDim}`}
           style={{ transition: dimTransition }}
         >
-          <span className="block truncate text-left text-sm text-zinc-700 dark:text-zinc-50">
+          <span
+            className={`block truncate text-left text-sm transition-colors ${checkedTextStyle}`}
+            style={{ transitionDuration: `${CHECKED_ROW_DIM_MS}ms` }}
+          >
             {task.name}
           </span>
           {task.listName && (

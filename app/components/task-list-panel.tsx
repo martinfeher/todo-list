@@ -13,6 +13,9 @@ import {
 } from "./task-row-context-menu";
 import type { TaskListItem, TodoList } from "./todo-app";
 import type { TaskDueTime } from "@/lib/task-due-time";
+import { resolveCalendarSlotFromPoint } from "@/lib/calendar-drag";
+import type { CalendarDropSlot } from "@/lib/calendar-time-grid";
+import { formatShortDayMonth } from "@/lib/date-format";
 import {
   buildVisibleTasks,
   clampSubtaskKeepDropIndex,
@@ -58,6 +61,8 @@ type TaskDragState = {
   section: "pinned" | "unpinned";
   hierarchyIntent: HierarchyDragIntent;
   sourceParentId: string | null;
+  lastPointerX: number;
+  lastPointerY: number;
 };
 
 const SORT_OPTIONS: SortOption[] = [
@@ -66,6 +71,20 @@ const SORT_OPTIONS: SortOption[] = [
   { field: "title", direction: "asc", label: "Title (A-Z)" },
   { field: "title", direction: "desc", label: "Title (Z-A)" },
 ];
+
+function shouldIgnoreAddTaskShortcut(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+
+  if (target.closest("[data-task-details-panel]")) {
+    return false;
+  }
+
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.isContentEditable
+  );
+}
 
 function formatActiveSortLabel(label: string) {
   return label
@@ -114,10 +133,7 @@ function formatTaskDueDateLabel(value: string | null) {
   if (isSameDay(dueDay, today)) return "Today";
   if (isSameDay(dueDay, tomorrow)) return "Tomorrow";
 
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-  }).format(date);
+  return formatShortDayMonth(date);
 }
 
 function getDueDateTimestamp(dueDate: string | null) {
@@ -215,9 +231,11 @@ type TaskListPanelProps = {
   onTaskHoverStart?: (taskId: string) => void;
   onTaskHoverEnd?: () => void;
   showListCalendarButton?: boolean;
+  isListCalendarOpen?: boolean;
   listCalendarButtonRef?: RefObject<HTMLButtonElement | null>;
-  onListCalendarHoverStart?: () => void;
-  onListCalendarHoverLeave?: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onListCalendarClick?: () => void;
+  enableCalendarDragDrop?: boolean;
+  onCalendarDropTargetChange?: (target: CalendarDropSlot | null) => void;
   isListHovered?: boolean;
   onPanelMouseEnter?: () => void;
 };
@@ -254,9 +272,11 @@ export function TaskListPanel({
   onTaskHoverStart,
   onTaskHoverEnd,
   showListCalendarButton = false,
+  isListCalendarOpen = false,
   listCalendarButtonRef,
-  onListCalendarHoverStart,
-  onListCalendarHoverLeave,
+  onListCalendarClick,
+  enableCalendarDragDrop = false,
+  onCalendarDropTargetChange,
   isListHovered = false,
   onPanelMouseEnter,
 }: TaskListPanelProps) {
@@ -517,6 +537,23 @@ export function TaskListPanel({
   }, [orderedTasks.length]);
 
   useEffect(() => {
+    if (!showAddTask) return;
+
+    function handleAddTaskShortcut(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.key !== "Enter") return;
+      if (event.altKey || event.shiftKey) return;
+      if (shouldIgnoreAddTaskShortcut(event.target)) return;
+
+      event.preventDefault();
+      setIsAddingTask(true);
+    }
+
+    window.addEventListener("keydown", handleAddTaskShortcut);
+    return () => window.removeEventListener("keydown", handleAddTaskShortcut);
+  }, [showAddTask]);
+
+  useEffect(() => {
     if (!isAddingTask) return;
 
     requestAnimationFrame(() => {
@@ -545,7 +582,6 @@ export function TaskListPanel({
     setActiveSort(null);
 
     requestAnimationFrame(() => {
-      newTaskInputRef.current?.focus();
       keepAddTaskOpenRef.current = false;
     });
   }
@@ -859,6 +895,22 @@ export function TaskListPanel({
     const dragState = dragStateRef.current;
     if (!dragState) return;
 
+    dragState.lastPointerX = event.clientX;
+    dragState.lastPointerY = event.clientY;
+
+    if (enableCalendarDragDrop) {
+      const dropSlot = resolveCalendarSlotFromPoint(
+        event.clientX,
+        event.clientY,
+      );
+      onCalendarDropTargetChange?.(dropSlot);
+
+      if (dropSlot) {
+        setDropIndicator(null);
+        return;
+      }
+    }
+
     const list =
       dragState.section === "pinned"
         ? pinnedListRef.current
@@ -940,6 +992,8 @@ export function TaskListPanel({
       section,
       hierarchyIntent: sourceParentId ? "keep" : "root",
       sourceParentId,
+      lastPointerX: 0,
+      lastPointerY: 0,
     };
 
     sourceRow.classList.add("opacity-50");
@@ -970,7 +1024,41 @@ export function TaskListPanel({
 
     setDropIndicator(null);
 
-    if (dragState && listId && onReorderTasks) {
+    if (enableCalendarDragDrop) {
+      onCalendarDropTargetChange?.(null);
+    }
+
+    if (
+      dragState &&
+      enableCalendarDragDrop &&
+      onSetTaskDueDate
+    ) {
+      const dropSlot = resolveCalendarSlotFromPoint(
+        dragState.lastPointerX,
+        dragState.lastPointerY,
+      );
+
+      if (dropSlot) {
+        onSetTaskDueDate(dragState.sourceTaskId, dropSlot.dateKey);
+
+        if (dropSlot.dueTimeMinutes !== null && onSetTaskDueTime) {
+          onSetTaskDueTime(dragState.sourceTaskId, {
+            dueTimeMinutes: dropSlot.dueTimeMinutes,
+            dueDurationMinutes: null,
+            dueTimeZone: "floating",
+          });
+        }
+
+        if (wasDragging) {
+          suppressRowClickRef.current = true;
+        }
+
+        dragStateRef.current = null;
+        return;
+      }
+    }
+
+    if (dragState && listId && onReorderTasks && canReorder) {
       let dropIndex = dragState.dropIndex;
 
       if (
@@ -1029,7 +1117,7 @@ export function TaskListPanel({
     taskId: string,
     section: "pinned" | "unpinned",
   ) {
-    if (!canReorder || event.button !== 0) return;
+    if ((!canReorder && !enableCalendarDragDrop) || event.button !== 0) return;
     if (!shouldStartRowDrag(event.target)) return;
 
     const list =
@@ -1129,7 +1217,7 @@ export function TaskListPanel({
           editingTaskId={editingTaskId}
           titleDraft={titleDraft}
           titleInputRef={titleInputRef}
-          showDragHandle={canReorder}
+          showDragHandle={canReorder || enableCalendarDragDrop}
           openDatePickerTaskId={openDatePickerTaskId}
           openMenuTaskId={openMenuTaskId}
           openLabelMenuTaskId={openLabelMenuTaskId}
@@ -1252,14 +1340,96 @@ export function TaskListPanel({
           }`}
         >
           {showHeader && (
-            <header className="border-b border-zinc-200 pl-[26px] pr-4 py-3 dark:border-zinc-800">
-              <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+            <header className="flex items-center justify-between gap-2 border-b border-zinc-200 py-3 pl-[26px] pr-4 dark:border-zinc-800">
+              <h1 className="min-w-0 truncate text-xl font-semibold text-zinc-900 dark:text-zinc-50">
                 {title}
               </h1>
+              <div className="flex shrink-0 items-center gap-1">
+              {orderedTasks.length >= 2 ? (
+                <div
+                  className="relative flex shrink-0 items-center"
+                  ref={sortMenuRef}
+                  onMouseEnter={() => setIsSortMenuOpen(true)}
+                  onMouseLeave={() => setIsSortMenuOpen(false)}
+                >
+                  <button
+                    type="button"
+                    aria-label={
+                      activeSort
+                        ? `Sort tasks. Currently sorted by ${activeSort.label}`
+                        : "Sort tasks"
+                    }
+                    aria-haspopup="menu"
+                    aria-expanded={isSortMenuOpen}
+                    className="flex h-[31px] cursor-pointer items-center rounded-lg px-1 text-[14px] text-[#777777] transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                  >
+                    <BiSortAlt2
+                      className="size-[15px] shrink-0"
+                      aria-hidden="true"
+                    />
+                    {activeSort ? (
+                      <div className="ml-[1px] flex">
+                        Sort:{" "}
+                        <div className="ml-[1px] mt-[3.5px] cursor-pointer text-[11px] font-medium">
+                          {formatActiveSortLabel(activeSort.label)}
+                        </div>
+                      </div>
+                    ) : (
+                      "Sort"
+                    )}
+                  </button>
+
+                  {isSortMenuOpen && (
+                    <div className="absolute right-0 top-full z-50 min-w-[180px] pt-1">
+                      <div
+                        role="menu"
+                        className="overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+                      >
+                        {SORT_OPTIONS.map((option) => (
+                          <button
+                            key={`${option.field}-${option.direction}`}
+                            type="button"
+                            role="menuitem"
+                            onClick={() =>
+                              applySort(option.field, option.direction)
+                            }
+                            className="flex h-[35px] w-full cursor-pointer items-center px-3 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+                {showListCalendarButton && hasScheduledTasks ? (
+                  <button
+                    ref={listCalendarButtonRef}
+                    type="button"
+                    onClick={onListCalendarClick}
+                    aria-pressed={isListCalendarOpen}
+                    aria-label={`Calendar - ${title}`}
+                    className={`group flex shrink-0 items-center overflow-hidden rounded-lg py-[4px] pl-[9px] pr-[9px] transition-[background-color,padding] cursor-pointer ${
+                      isListCalendarOpen
+                        ? "bg-[#4873c7] text-white"
+                        : "bg-zinc-150 text-zinc-700 hover:bg-zinc-250 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                    }`}
+                  >
+                    <LuCalendarCheck2
+                      className="size-4 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span className="max-w-0 overflow-hidden whitespace-nowrap text-[12px] font-medium opacity-0 transition-[max-width,opacity,padding] duration-200 ease-out group-hover:max-w-[12rem] group-hover:pl-1.5 group-hover:opacity-100">
+                      {title}
+                    </span>
+                  </button>
+                ) : null}
+              </div>
             </header>
           )}
 
-          <div className="flex items-center justify-between gap-2 pl-[26px] pr-1.5 py-3">
+          <div className="flex items-center pl-[26px] pr-1.5 py-3">
             {showAddTask ? (
               isAddingTask ? (
                 <form
@@ -1324,68 +1494,13 @@ export function TaskListPanel({
                 <button
                   type="button"
                   onClick={startAddingTask}
+                  title="Add task (Ctrl+Enter / Cmd+Enter)"
                   className="flex h-[33px] items-center gap-2 rounded-lg bg-[#4873c7] pl-[13px] pr-[15px] text-sm font-medium text-white transition-colors cursor-pointer hover:bg-[#3f68bd]"
                 >
                   <LuPlus className="size-4" aria-hidden="true" />
                   Add task
                 </button>
               )
-            ) : (
-              <div className="flex-1" />
-            )}
-
-            {orderedTasks.length >= 2 ? (
-            <div
-              className="relative shrink-0 flex items-center"
-              ref={sortMenuRef}
-              onMouseEnter={() => setIsSortMenuOpen(true)}
-              onMouseLeave={() => setIsSortMenuOpen(false)}
-            >
-              <button
-                type="button"
-                aria-label={
-                  activeSort
-                    ? `Sort tasks. Currently sorted by ${activeSort.label}`
-                    : "Sort tasks"
-                }
-                aria-haspopup="menu"
-                aria-expanded={isSortMenuOpen}
-                className="flex h-[31px] items-center rounded-lg px-1 text-[14px] text-[#777777] transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 cursor-pointer"
-              >
-                <BiSortAlt2 className="size-[15px] shrink-0" aria-hidden="true" />
-                {activeSort ? (
-                  <div className="flex ml-[1px]">
-                    Sort:{" "}
-                    <div className="text-[11px] font-medium ml-[1px] mt-[3.5px] cursor-pointer">
-                      {formatActiveSortLabel(activeSort.label)}
-                    </div>
-                  </div>
-                ) : (
-                  "Sort"
-                )}
-              </button>
-
-              {isSortMenuOpen && (
-                <div className="absolute right-0 top-full z-50 min-w-[180px] pt-1">
-                  <div
-                    role="menu"
-                    className="overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
-                  >
-                    {SORT_OPTIONS.map((option) => (
-                      <button
-                        key={`${option.field}-${option.direction}`}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => applySort(option.field, option.direction)}
-                        className="flex h-[35px] w-full items-center px-3 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800/80 cursor-pointer"
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
             ) : null}
           </div>
 
@@ -1453,24 +1568,6 @@ export function TaskListPanel({
               )
             )}
           </ul>
-
-          {showListCalendarButton && hasScheduledTasks ? (
-            <div className="flex justify-end border-t border-zinc-200 px-4 py-2 dark:border-zinc-800">
-              <button
-                ref={listCalendarButtonRef}
-                type="button"
-                onMouseEnter={onListCalendarHoverStart}
-                onMouseLeave={onListCalendarHoverLeave}
-                aria-label={`Calendar - ${title}`}
-                className="group flex items-center overflow-hidden rounded-lg bg-zinc-150 py-[4px] pl-[9px] pr-[9px] text-zinc-700 transition-[background-color,padding] hover:bg-zinc-250 cursor-pointer dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-              >
-                <LuCalendarCheck2 className="size-4 shrink-0" aria-hidden="true" />
-                <span className="max-w-0 overflow-hidden whitespace-nowrap text-[12px] font-medium opacity-0 transition-[max-width,opacity,padding] duration-200 ease-out group-hover:max-w-[12rem] group-hover:pl-1.5 group-hover:opacity-100">
-                  {title}
-                </span>
-              </button>
-            </div>
-          ) : null}
           </div>
 
         </div>

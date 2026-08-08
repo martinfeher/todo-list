@@ -23,17 +23,18 @@ import {
 } from "@/app/actions/todo";
 import type { TaskParentUpdate } from "@/app/actions/todo";
 import type { TaskDueTime } from "@/lib/task-due-time";
+import type { CalendarDropSlot } from "@/lib/calendar-time-grid";
 import { taskDetailsHasContent } from "@/lib/task-details-content";
 import { Sidebar } from "./sidebar";
-import { CalendarPanel, CalendarMonthView } from "./calendar-panel";
+import { CalendarPanel, CalendarViewsPanel } from "./calendar-panel";
 import { plainTextToTaskDetails } from "./calendar-add-task-popover";
 import { TaskDetailsPanel } from "./task-details-panel";
 import { PanelResizeHandle } from "./panel-resize-handle";
 import { TaskListPanel } from "./task-list-panel";
 import {
-  CHECKED_ROW_DIM_MS,
   CHECKMARK_HIDE_FADE_MS,
   CHECKMARK_HIDE_MS,
+  TASK_COMPLETE_ANIMATION_MS,
   clearCheckboxCheckStart,
 } from "./task-completion-checkbox";
 import { mergeReorderedPinnedTasks, mergeReorderedUnpinnedTasks } from "./task-reorder";
@@ -158,10 +159,10 @@ function withPinnedDefaults(tasksByList: Record<string, Task[]>) {
 
 const UNDO_VISIBLE_MS = 7000;
 const CHECKBOX_COMPLETE_ANIMATION_MS = 280;
-/** Remove the row after checkmark hide and row dim both finish. */
+/** Remove the row after checkmark hide and celebration animation finish. */
 const COMPLETION_REMOVE_MS = Math.max(
   CHECKMARK_HIDE_MS + CHECKMARK_HIDE_FADE_MS,
-  CHECKED_ROW_DIM_MS,
+  TASK_COMPLETE_ANIMATION_MS,
 );
 const COMPLETION_DISPLAY_MS = Math.max(
   0,
@@ -361,9 +362,25 @@ export function TodoApp({
   const pathname = usePathname();
   const [lists, setLists] = useState(initialLists);
   const [labels, setLabels] = useState(initialLabels);
-  const [selectedListId, setSelectedListId] = useState<string | null>(null);
+  const [selectedListId, setSelectedListId] = useState<string | null>(() => {
+    if (initialActiveView === "calendar") return null;
+    return initialLists[0]?.id ?? null;
+  });
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => {
+    if (initialActiveView === "calendar") return null;
+
+    const firstListId = initialLists[0]?.id;
+    if (!firstListId) return null;
+
+    return getFirstVisibleTaskId(
+      null,
+      firstListId,
+      null,
+      initialLists,
+      withPinnedDefaults(initialTasksByList),
+    );
+  });
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
   const [suppressListSelectionHighlightId, setSuppressListSelectionHighlightId] =
     useState<string | null>(null);
@@ -393,10 +410,10 @@ export function TodoApp({
   sidebarHoverPreviewRef.current = sidebarHoverPreview;
   const completionTimerRef = useRef<Record<string, number>>({});
   const [isListCalendarOpen, setIsListCalendarOpen] = useState(false);
+  const [calendarExternalDropTarget, setCalendarExternalDropTarget] =
+    useState<CalendarDropSlot | null>(null);
   const listCalendarButtonRef = useRef<HTMLButtonElement>(null);
-  const listCalendarPanelRef = useRef<HTMLDivElement>(null);
   const listCalendarReturnTaskIdRef = useRef<string | null>(null);
-  const listCalendarCloseTimerRef = useRef<number | null>(null);
   const [taskListWidth, setTaskListWidth] = useState(DEFAULT_TASK_LIST_WIDTH);
   const [hasResizedTaskList, setHasResizedTaskList] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement>(null);
@@ -1007,6 +1024,13 @@ export function TodoApp({
     selectCompletedTask(taskId, listId);
   }
 
+  function selectNewTaskAndFocusDetails(taskId: string) {
+    listCalendarReturnTaskIdRef.current = null;
+    setIsListCalendarOpen(false);
+    setSelectedTaskId(taskId);
+    setFocusNoteAtEndRequest((current) => current + 1);
+  }
+
   async function addList(name: string) {
     if (!name.trim()) return;
 
@@ -1114,9 +1138,7 @@ export function TodoApp({
       [targetListId]: [newTask, ...(current[targetListId] ?? [])],
     }));
 
-    if (activeView === "today" || activeView === "important") {
-      setSelectedTaskId(task.id);
-    }
+    selectNewTaskAndFocusDetails(task.id);
   }
 
   async function addCalendarTask(payload: {
@@ -1124,8 +1146,9 @@ export function TodoApp({
     dueDate: string;
     details: string;
     listId: string;
+    dueTimeMinutes?: number | null;
   }) {
-    const { name, dueDate, details, listId } = payload;
+    const { name, dueDate, details, listId, dueTimeMinutes = null } = payload;
     if (!name.trim() || !listId) return;
 
     const task = await createTask(listId, name.trim(), dueDate);
@@ -1135,6 +1158,21 @@ export function TodoApp({
       await updateTaskDetailsInDb(task.id, detailsHtml);
     }
 
+    let resolvedDueTimeMinutes: number | null = null;
+    let resolvedDueDurationMinutes: number | null = null;
+    let resolvedDueTimeZone: TaskDueTime["dueTimeZone"] = "floating";
+
+    if (dueTimeMinutes !== null && dueTimeMinutes !== undefined) {
+      const updated = await updateTaskDueTimeInDb(task.id, {
+        dueTimeMinutes,
+        dueDurationMinutes: null,
+        dueTimeZone: "floating",
+      });
+      resolvedDueTimeMinutes = updated.dueTimeMinutes;
+      resolvedDueDurationMinutes = updated.dueDurationMinutes;
+      resolvedDueTimeZone = updated.dueTimeZone;
+    }
+
     const newTask: Task = {
       id: task.id,
       name: task.name,
@@ -1142,9 +1180,9 @@ export function TodoApp({
       details: detailsHtml,
       hasDetails: taskDetailsHasContent(detailsHtml),
       dueDate: task.dueDate ? new Date(task.dueDate).toISOString() : null,
-      dueTimeMinutes: null,
-      dueDurationMinutes: null,
-      dueTimeZone: "floating",
+      dueTimeMinutes: resolvedDueTimeMinutes,
+      dueDurationMinutes: resolvedDueDurationMinutes,
+      dueTimeZone: resolvedDueTimeZone,
       priority: null,
       pinned: false,
       important: false,
@@ -1157,7 +1195,7 @@ export function TodoApp({
       [listId]: [newTask, ...(current[listId] ?? [])],
     }));
 
-    setSelectedTaskId(task.id);
+    selectNewTaskAndFocusDetails(task.id);
   }
 
   async function toggleTask(taskId: string) {
@@ -1609,16 +1647,9 @@ export function TodoApp({
     await reorderTasksInDb(listId, mergedTaskIds, parentUpdates);
   }
 
-  const cancelListCalendarClose = useCallback(() => {
-    if (listCalendarCloseTimerRef.current !== null) {
-      window.clearTimeout(listCalendarCloseTimerRef.current);
-      listCalendarCloseTimerRef.current = null;
-    }
-  }, []);
-
   const closeListCalendar = useCallback(() => {
-    cancelListCalendarClose();
     setIsListCalendarOpen(false);
+    setCalendarExternalDropTarget(null);
 
     const returnTaskId = listCalendarReturnTaskIdRef.current;
     listCalendarReturnTaskIdRef.current = null;
@@ -1626,63 +1657,43 @@ export function TodoApp({
     if (returnTaskId) {
       setSelectedTaskId(returnTaskId);
     }
-  }, [cancelListCalendarClose]);
+  }, []);
 
-  const scheduleListCalendarClose = useCallback(() => {
-    cancelListCalendarClose();
-    listCalendarCloseTimerRef.current = window.setTimeout(() => {
-      closeListCalendar();
-    }, 120);
-  }, [cancelListCalendarClose, closeListCalendar]);
-
-  const openListCalendar = useCallback(() => {
+  const toggleListCalendar = useCallback(() => {
     if (!selectedListId) return;
 
-    cancelListCalendarClose();
+    if (isListCalendarOpen) {
+      closeListCalendar();
+      return;
+    }
+
     listCalendarReturnTaskIdRef.current = selectedTaskId;
     setIsListCalendarOpen(true);
-  }, [cancelListCalendarClose, selectedListId, selectedTaskId]);
+  }, [closeListCalendar, isListCalendarOpen, selectedListId, selectedTaskId]);
 
-  const handleListCalendarButtonMouseLeave = useCallback(
-    (event: React.MouseEvent<HTMLButtonElement>) => {
-      const panel = listCalendarPanelRef.current;
-      const relatedTarget = event.relatedTarget;
-
-      if (
-        relatedTarget instanceof Node &&
-        panel?.contains(relatedTarget)
-      ) {
-        return;
+  const handleTaskListSelect = useCallback(
+    (taskId: string) => {
+      if (isListCalendarOpen) {
+        listCalendarReturnTaskIdRef.current = null;
+        setIsListCalendarOpen(false);
       }
-
-      scheduleListCalendarClose();
+      setSelectedTaskId(taskId);
     },
-    [scheduleListCalendarClose],
+    [isListCalendarOpen],
   );
 
-  const handleListCalendarPanelMouseLeave = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      const button = listCalendarButtonRef.current;
-      const relatedTarget = event.relatedTarget;
-
-      if (
-        relatedTarget instanceof Node &&
-        button?.contains(relatedTarget)
-      ) {
-        return;
-      }
-
-      scheduleListCalendarClose();
-    },
-    [scheduleListCalendarClose],
-  );
+  const handleListCalendarTaskSelect = useCallback((taskId: string) => {
+    listCalendarReturnTaskIdRef.current = null;
+    setIsListCalendarOpen(false);
+    setSelectedTaskId(taskId);
+  }, []);
 
   useEffect(() => {
     setIsListCalendarOpen(false);
     listCalendarReturnTaskIdRef.current = null;
-    cancelListCalendarClose();
+    setCalendarExternalDropTarget(null);
     setHoveredTaskId(null);
-  }, [selectedListId, cancelListCalendarClose]);
+  }, [selectedListId]);
 
   useEffect(() => {
     setHoveredTaskId(null);
@@ -1694,13 +1705,12 @@ export function TodoApp({
 
   useEffect(() => {
     return () => {
-      cancelListCalendarClose();
       cancelSidebarHoverClear();
       if (listSelectionHighlightTimerRef.current !== null) {
         window.clearTimeout(listSelectionHighlightTimerRef.current);
       }
     };
-  }, [cancelListCalendarClose, cancelSidebarHoverClear]);
+  }, [cancelSidebarHoverClear]);
 
   const showRightPanel = displayedTaskId !== null || isListCalendarOpen;
   const showTaskDetails = displayedTaskId !== null && !isListCalendarOpen;
@@ -1815,7 +1825,7 @@ export function TodoApp({
                 listId={displayedListId}
                 onAddTask={addTask}
                 onToggleTask={toggleTask}
-                onSelectTask={setSelectedTaskId}
+                onSelectTask={handleTaskListSelect}
                 onRenameTask={renameTask}
                 onTaskNameChange={handleTaskRenamed}
                 onReorderTasks={reorderTasks}
@@ -1830,35 +1840,38 @@ export function TodoApp({
                 onTaskHoverStart={handleTaskHoverStart}
                 onTaskHoverEnd={() => setHoveredTaskId(null)}
                 showListCalendarButton={displayedListId !== null}
+                isListCalendarOpen={isListCalendarOpen}
                 listCalendarButtonRef={listCalendarButtonRef}
-                onListCalendarHoverStart={openListCalendar}
-                onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
+                onListCalendarClick={toggleListCalendar}
+                enableCalendarDragDrop={isListCalendarOpen}
+                onCalendarDropTargetChange={setCalendarExternalDropTarget}
                 isListHovered={sidebarHoverPreview !== null}
               />
               <PanelResizeHandle onPointerDown={handleTaskListResizeStart} />
             </div>
             <div className="flex min-h-0 min-w-[300px] flex-1 flex-col overflow-hidden">
-              {isListCalendarOpen && (
-                <div
-                  ref={listCalendarPanelRef}
-                  onMouseEnter={cancelListCalendarClose}
-                  onMouseLeave={handleListCalendarPanelMouseLeave}
-                  className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white dark:bg-zinc-950"
-                >
-                  <CalendarMonthView
-                    tasks={taskListItems}
-                    lists={lists}
-                    selectedTaskId={selectedTaskId}
-                    onSelectTask={setSelectedTaskId}
-                    onToggleTask={toggleTask}
-                    onSetTaskDueDate={setTaskDueDate}
-                    onSetTaskDueTime={setTaskDueTime}
-                    onMoveTaskToList={moveTaskToList}
-                    onAddCalendarTask={addCalendarTask}
-                    defaultListId={displayedListId}
-                  />
-                </div>
-              )}
+              {isListCalendarOpen ? (
+                <CalendarViewsPanel
+                  tasks={taskListItems}
+                  lists={lists}
+                  selectedTaskId={selectedTaskId}
+                  onSelectTask={handleListCalendarTaskSelect}
+                  onToggleTask={toggleTask}
+                  onSetTaskDueDate={setTaskDueDate}
+                  onSetTaskDueTime={setTaskDueTime}
+                  onMoveTaskToList={moveTaskToList}
+                  onAddCalendarTask={addCalendarTask}
+                  defaultListId={displayedListId}
+                  defaultView="day"
+                  fullWidth
+                  externalDropTargetDateKey={
+                    calendarExternalDropTarget?.dateKey ?? null
+                  }
+                  externalDropTargetTimeMinutes={
+                    calendarExternalDropTarget?.dueTimeMinutes ?? null
+                  }
+                />
+              ) : null}
               {showTaskDetails && (
                 <div
                   className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-[filter] duration-200 ${
@@ -1903,7 +1916,7 @@ export function TodoApp({
               listId={displayedListId}
               onAddTask={addTask}
               onToggleTask={toggleTask}
-              onSelectTask={setSelectedTaskId}
+              onSelectTask={handleTaskListSelect}
               onRenameTask={renameTask}
               onTaskNameChange={handleTaskRenamed}
               onReorderTasks={reorderTasks}
@@ -1918,9 +1931,11 @@ export function TodoApp({
               onTaskHoverStart={handleTaskHoverStart}
               onTaskHoverEnd={() => setHoveredTaskId(null)}
               showListCalendarButton={displayedListId !== null}
+              isListCalendarOpen={isListCalendarOpen}
               listCalendarButtonRef={listCalendarButtonRef}
-              onListCalendarHoverStart={openListCalendar}
-              onListCalendarHoverLeave={handleListCalendarButtonMouseLeave}
+              onListCalendarClick={toggleListCalendar}
+              enableCalendarDragDrop={isListCalendarOpen}
+              onCalendarDropTargetChange={setCalendarExternalDropTarget}
               isListHovered={sidebarHoverPreview !== null}
               onPanelMouseEnter={commitSidebarHoverSelection}
             />

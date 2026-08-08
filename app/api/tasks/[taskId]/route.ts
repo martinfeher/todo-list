@@ -4,6 +4,7 @@ import { jsonWithCors, optionsWithCors } from "@/lib/api-cors";
 import { LABEL_CATEGORY } from "@/lib/task-tags";
 import { normalizeDueTimeZone } from "@/lib/task-due-time";
 import { getPriorityFromTaskTags } from "@/lib/task-tags";
+import { updateTaskPriority } from "@/app/actions/todo";
 
 type RouteContext = {
   params: Promise<{ taskId: string }>;
@@ -71,11 +72,19 @@ export async function GET(_request: Request, context: RouteContext) {
 export async function PATCH(request: Request, context: RouteContext) {
   const { taskId } = await context.params;
 
-  let body: { completed?: boolean; important?: boolean; name?: string };
+  let body: {
+    completed?: boolean;
+    important?: boolean;
+    pinned?: boolean;
+    priority?: number | null;
+    name?: string;
+  };
   try {
     body = (await request.json()) as {
       completed?: boolean;
       important?: boolean;
+      pinned?: boolean;
+      priority?: number | null;
       name?: string;
     };
   } catch {
@@ -85,10 +94,12 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (
     body.completed === undefined &&
     body.important === undefined &&
+    body.pinned === undefined &&
+    body.priority === undefined &&
     body.name === undefined
   ) {
     return jsonWithCors(
-      { error: "Provide completed, important, and/or name" },
+      { error: "Provide completed, important, pinned, priority, and/or name" },
       { status: 400 },
     );
   }
@@ -99,6 +110,24 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   if (body.important !== undefined && typeof body.important !== "boolean") {
     return jsonWithCors({ error: "important must be a boolean" }, { status: 400 });
+  }
+
+  if (body.pinned !== undefined && typeof body.pinned !== "boolean") {
+    return jsonWithCors({ error: "pinned must be a boolean" }, { status: 400 });
+  }
+
+  if (
+    body.priority !== undefined &&
+    body.priority !== null &&
+    (typeof body.priority !== "number" ||
+      !Number.isInteger(body.priority) ||
+      body.priority < 1 ||
+      body.priority > 3)
+  ) {
+    return jsonWithCors(
+      { error: "priority must be null or an integer 1–3" },
+      { status: 400 },
+    );
   }
 
   if (body.name !== undefined) {
@@ -119,28 +148,53 @@ export async function PATCH(request: Request, context: RouteContext) {
     return jsonWithCors({ error: "Task not found" }, { status: 404 });
   }
 
-  const task = await prisma.task.update({
-    where: { id: taskId },
-    data: {
-      ...(body.completed !== undefined ? { completed: body.completed } : {}),
-      ...(body.important !== undefined ? { important: body.important } : {}),
-      ...(body.name !== undefined ? { name: body.name.trim() } : {}),
-    },
-    select: {
-      id: true,
-      name: true,
-      completed: true,
-      important: true,
-      dueDate: true,
-    },
-  });
+  try {
+    if (body.priority !== undefined) {
+      await updateTaskPriority(taskId, body.priority);
+    }
 
-  revalidatePath("/");
+    const task = await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        ...(body.completed !== undefined ? { completed: body.completed } : {}),
+        ...(body.important !== undefined ? { important: body.important } : {}),
+        ...(body.pinned !== undefined ? { pinned: body.pinned } : {}),
+        ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        completed: true,
+        important: true,
+        pinned: true,
+        dueDate: true,
+        tags: {
+          include: {
+            tag: {
+              select: { category: true, level: true },
+            },
+          },
+        },
+      },
+    });
 
-  return jsonWithCors({
-    ...task,
-    dueDate: task.dueDate ? task.dueDate.toISOString() : null,
-  });
+    revalidatePath("/");
+
+    return jsonWithCors({
+      id: task.id,
+      name: task.name,
+      completed: task.completed,
+      important: task.important,
+      pinned: task.pinned,
+      priority: getPriorityFromTaskTags(task.tags),
+      dueDate: task.dueDate ? task.dueDate.toISOString() : null,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to update task";
+    console.error("Failed to update task for mobile API:", error);
+    return jsonWithCors({ error: message }, { status: 500 });
+  }
 }
 
 export function OPTIONS() {

@@ -10,8 +10,10 @@ const CHECKMARK_OUTLINE_CIRCLE_PATH =
 
 export const CHECKMARK_HIDE_MS = 950;
 export const CHECKMARK_HIDE_FADE_MS = 200;
-/** Brightness/blur dim on the checked task row. */
-export const CHECKED_ROW_DIM_MS = 400;
+/** Row celebration + settle background animation duration. */
+export const TASK_COMPLETE_ANIMATION_MS = 350;
+/** Text/content dim during task completion. */
+export const CHECKED_ROW_DIM_MS = TASK_COMPLETE_ANIMATION_MS;
 const checkStartTimes = new Map<string, number>();
 
 export function clearCheckboxCheckStart(checkKey: string) {

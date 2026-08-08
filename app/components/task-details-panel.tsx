@@ -14,6 +14,7 @@ import {
 import { renameTask, updateTaskDueDate, updateTaskDueTime } from "@/app/actions/todo";
 import { fetchTaskById, saveTaskDetails, saveTaskDetailsKeepalive } from "@/lib/task-details-api";
 import { taskDetailsHasContent } from "@/lib/task-details-content";
+import { formatShortDayMonthYear } from "@/lib/date-format";
 import {
   formatDueTimeLabel,
   formatDurationLabel,
@@ -219,11 +220,7 @@ function formatDueDateLabel(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
 
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
+  return formatShortDayMonthYear(date);
 }
 
 function formatSaveTime(date: Date) {
@@ -2255,6 +2252,7 @@ export function TaskDetailsPanel({
   return (
     <section
       ref={panelRef}
+      data-task-details-panel
       className="relative min-w-[300px] flex-1 bg-[#fbfbfc] "
     >
       <div className="relative flex items-center justify-between overflow-visible p-4">

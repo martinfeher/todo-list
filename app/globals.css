@@ -679,6 +679,161 @@ body {
   border-color: green;
 }
 
+/* Task row completion: purple flash → rainbow sweep → light green settle */
+.task-row-completing {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: #fff;
+}
+
+.task-row-completing > * {
+  position: relative;
+  z-index: 1;
+}
+
+.task-row-completing::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    #f06a6a 0%,
+    #f5a623 12%,
+    #f8d84e 24%,
+    #5da283 38%,
+    #3dccc7 52%,
+    #4a86e8 66%,
+    #9b59b6 80%,
+    #7c6cf0 100%
+  );
+  transform: translateX(-100%);
+  animation: task-row-rainbow-sweep var(--task-complete-duration, 3.5s) ease-out
+    forwards;
+}
+
+.task-row-completing::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: #eef7f2;
+  animation: task-row-complete-settle var(--task-complete-duration, 3.5s) ease-out
+    forwards;
+}
+
+@keyframes task-row-rainbow-sweep {
+  0%,
+  5% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+
+  9% {
+    opacity: 1;
+  }
+
+  38% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+
+  56% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+
+  70% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+
+  100% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+}
+
+@keyframes task-row-complete-settle {
+  0%,
+  6% {
+    opacity: 0;
+    background: #fff;
+  }
+
+  9% {
+    opacity: 1;
+    background: #ede9fe;
+  }
+
+  16% {
+    opacity: 0;
+  }
+
+  66% {
+    opacity: 1;
+    background: #eef7f2;
+  }
+
+  100% {
+    opacity: 1;
+    background: #eef7f2;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .task-row-completing {
+    background-color: #09090b;
+  }
+
+  .task-row-completing::after {
+    background: #14532d;
+  }
+
+  @keyframes task-row-complete-settle {
+    0%,
+    6% {
+      opacity: 0;
+      background: #09090b;
+    }
+
+    9% {
+      opacity: 1;
+      background: #2e1065;
+    }
+
+    16% {
+      opacity: 0;
+    }
+
+    66% {
+      opacity: 1;
+      background: #14532d;
+    }
+
+    100% {
+      opacity: 1;
+      background: #14532d;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-row-completing::before,
+  .task-row-completing::after {
+    animation: none;
+  }
+
+  .task-row-completing::after {
+    opacity: 1;
+    background: #eef7f2;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   .checkbox-wrapper-29 {
     --background: #09090b;

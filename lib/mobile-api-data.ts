@@ -43,6 +43,7 @@ export type MobileTaskItem = {
   dueDate: string | null;
   pinned: boolean;
   important: boolean;
+  priority: number | null;
   parentId: string | null;
   depth: number;
   labels: { id: string; label: string }[];
@@ -63,6 +64,7 @@ type TaskSource = {
   dueDate: string | null;
   pinned: boolean;
   important: boolean;
+  priority?: number | null;
   parentId: string | null;
   labels: { id: string; label: string }[];
 };
@@ -79,6 +81,7 @@ function mapToMobileTask(
     dueDate: task.dueDate,
     pinned: task.pinned,
     important: task.important,
+    priority: task.priority ?? null,
     parentId: task.parentId,
     depth: task.depth ?? 0,
     labels: task.labels,
